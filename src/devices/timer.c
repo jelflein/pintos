@@ -95,11 +95,15 @@ timer_sleep(int64_t ticks) {
     while (timer_elapsed(start) < ticks)
         thread_yield();*/
 
+    enum intr_level old_level;
+
     struct thread *current_thread = thread_current();
     current_thread->is_sleep_activated = 1;
     current_thread->time_to_sleep = ticks;
 
+    old_level = intr_disable();
     thread_block();
+    intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
