@@ -9,7 +9,7 @@
 >> Fill in the names, email addresses and matriculation numbers of your group members.
 
 Jonas Elflein <jonase@coli.uni-saarland.de> 7003378
-FirstName LastName <email@domain.example> 9999999
+Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 
 ---- PRELIMINARIES ----
 
@@ -29,10 +29,36 @@ FirstName LastName <email@domain.example> 9999999
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct thread
+  {
+    ... we added the following struct members
+    int64_t time_to_sleep;
+    char is_sleep_activated;
+    ...
+  }
+
+is_sleep_activated is a boolean where true indicates a running sleep timer.
+time_to_sleep is an int which keeps track of the remaining ticks to sleep.
+
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe what happens in a call to timer_sleep(),
 >> including the effects of the timer interrupt handler.
+
+
+we set the current threads time_to_sleep to the desired sleep time.
+Then we mark the thread as sleeping by setting is_sleep_activated to true.
+Finally we suspend the thread.
+
+Inside the periodically-called timer interrupt handler, we go through all threads
+using the thread_foreach function. For every thread, we check if the thread is
+currently sleeping (state = THREAD_BLOCKED && is_sleep_activated).
+If it is, we decrement the time_to_sleep by one.
+If time_to_sleep is 0, we set is_sleep_activated to false and change the thread
+mode to THREAD_READY.
+
+
 
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
