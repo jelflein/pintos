@@ -1,0 +1,4 @@
+pintos run alarm-multiple
+pintos --gdb -- run alarm-multiple
+
+https://courses.mpi-sws.org/os-ws21/assignments/pintos/pintos_10.html#SEC148
