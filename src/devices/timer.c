@@ -95,6 +95,8 @@ timer_sleep(int64_t ticks) {
     while (timer_elapsed(start) < ticks)
         thread_yield();*/
 
+    ASSERT (intr_get_level () == INTR_ON);
+
     enum intr_level old_level;
 
     struct thread *current_thread = thread_current();
@@ -146,7 +148,7 @@ timer_mdelay(int64_t ms) {
    interrupts off for the interval between timer ticks or longer
    will cause timer ticks to be lost.  Thus, use timer_usleep()
    instead if interrupts are enabled. */
-void
+voidf
 timer_udelay(int64_t us) {
     real_time_delay(us, 1000 * 1000);
 }
@@ -172,7 +174,7 @@ timer_print_stats(void) {
 }
 
 static void thread_is_timer_over(struct thread *t, void *aux UNUSED) {
-    if (!t->is_sleep_activated) return;
+    if (!t->is_sleep_activated && t->status == THREAD_BLOCKED) return;
 
     t->time_to_sleep -= 1;
 
