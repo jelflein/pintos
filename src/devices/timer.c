@@ -180,10 +180,10 @@ static void thread_is_timer_over(struct thread *t, void *aux UNUSED) {
 
 /* Timer interrupt handler. */
 static void
-timer_interrupt (struct intr_frame *args UNUSED)
-{
-  ticks++;
-  thread_tick ();
+timer_interrupt(struct intr_frame *args UNUSED) {
+    ticks++;
+    thread_tick();
+    thread_foreach(thread_is_timer_over, NULL);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
