@@ -75,9 +75,9 @@ unsigned char buffer_append(char c)
 {
     ASSERT(is_full == 0);
 
-    //msg("appending %c\n", c);
+    msg("appending %c\n", c);
 
-    if (tail > sizeof(buffer) / sizeof(buffer[0]) - 1) {
+    if (tail > (sizeof(buffer) / sizeof(buffer[0]) - 1)) {
         tail = 0;
     }
 
@@ -99,7 +99,7 @@ void buffer_append_synchronized(char c)
     //msg ("acquire bufferlock %s \n", thread_current()->name);
     lock_acquire(&buffer_lock);
 
-    if (is_full)
+    while (is_full)
     {
         //msg ("wait for not full %16c \n", buffer);
         //msg ("wait for not full %s \n", thread_current()->name);
@@ -109,8 +109,8 @@ void buffer_append_synchronized(char c)
 
     buffer_append(c);
 
-    //msg ("signal not empty %s \n", thread_current()->name);
-    cond_signal(&not_empty_cond, &buffer_lock);
+    msg ("signal not empty %s \n", thread_current()->name);
+    cond_broadcast(&not_empty_cond, &buffer_lock);
 
     //msg ("release bufferlock %s \n", thread_current()->name);
     lock_release(&buffer_lock);
@@ -125,7 +125,7 @@ char buffer_take_front()
     char ret = buffer[head];
     head++;
 
-    if (head == sizeof(buffer) / sizeof(buffer[0])) {
+    if (head == (sizeof(buffer) / sizeof(buffer[0]))) {
         head = 0;
     }
 
@@ -142,9 +142,9 @@ char buffer_take_front_synchronized()
     //msg ("acquire bufferlock %s \n", thread_current()->name);
     lock_acquire(&buffer_lock);
 
-    if (is_buffer_empty()) {
-        //msg ("wait for not empty %s \n", thread_current()->name);
-        //msg ("wait for not empty %16c \n", buffer);
+    while (is_buffer_empty()) {
+        msg ("wait for not empty %s \n", thread_current()->name);
+        msg ("wait for not empty %16s \n", buffer);
 
         cond_wait(&not_empty_cond, &buffer_lock);
         //msg ("wating is over for not empty %s \n", thread_current()->name);
@@ -153,7 +153,7 @@ char buffer_take_front_synchronized()
     char ret = buffer_take_front();
 
     //msg ("signal not full %s \n", thread_current()->name);
-    cond_signal(&not_full_cond, &buffer_lock);
+    cond_broadcast(&not_full_cond, &buffer_lock);
 
     //msg ("release bufferlock %s \n", thread_current()->name);
     lock_release(&buffer_lock);
