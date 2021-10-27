@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -95,6 +96,8 @@ struct thread
 
     int64_t time_to_sleep;
     char is_sleep_activated;
+
+    struct semaphore sleep_sema;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
