@@ -102,6 +102,11 @@ static bool is_thread(struct thread *)UNUSED;
     init_thread(initial_thread, "main", PRI_DEFAULT);
     initial_thread->status = THREAD_RUNNING;
     initial_thread->tid = allocate_tid();
+
+    /* init timer */
+    initial_thread->is_sleep_activated = 0;
+    initial_thread->time_to_sleep = 0;
+    sema_init(&initial_thread->sleep_sema, 0);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.

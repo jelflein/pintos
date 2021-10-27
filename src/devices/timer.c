@@ -93,6 +93,12 @@ timer_sleep(int64_t ticks) {
     if (ticks <= 0) return;
 
     struct thread *current_thread = thread_current();
+
+    if (current_thread->is_sleep_activated == 1) {
+        printf("Trying to sleep while already sleeping. Abort...");
+        ASSERT(0);
+    }
+
     current_thread->is_sleep_activated = 1;
     current_thread->time_to_sleep = ticks;
 
@@ -165,7 +171,7 @@ timer_print_stats(void) {
 }
 
 static void thread_is_timer_over(struct thread *t, void *aux UNUSED) {
-    if (!t->is_sleep_activated && t->status == THREAD_BLOCKED) return;
+    if (!(t->is_sleep_activated && t->status == THREAD_BLOCKED)) return;
 
     t->time_to_sleep -= 1;
 
