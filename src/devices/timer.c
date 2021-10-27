@@ -94,11 +94,6 @@ timer_sleep(int64_t ticks) {
 
     struct thread *current_thread = thread_current();
 
-    if (current_thread->is_sleep_activated == 1) {
-        printf("Trying to sleep while already sleeping. Abort...");
-        ASSERT(0);
-    }
-
     current_thread->is_sleep_activated = 1;
     current_thread->time_to_sleep = ticks;
 
