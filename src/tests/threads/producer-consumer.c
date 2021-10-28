@@ -23,9 +23,9 @@ void test_producer_consumer(void)
     producer_consumer(3, 1);
     producer_consumer(1, 3);
     producer_consumer(4, 4);
-    producer_consumer(7, 2);
-    producer_consumer(2, 7);*/
-    producer_consumer(6, 6);
+    producer_consumer(7, 2);*/
+    producer_consumer(2, 7);
+    //producer_consumer(6, 6);
     pass();
 }
 
@@ -33,7 +33,7 @@ void test_producer_consumer(void)
 static char buffer[16];
 static unsigned int head;
 static unsigned int tail;
-static unsigned char is_full;
+static bool is_full;
 
 static struct lock buffer_lock;
 
@@ -46,7 +46,7 @@ void init_producer_consumer(void)
 {
     head = 0;
     tail = 0;
-    is_full = 0;
+    is_full = false;
 
     lock_init(&buffer_lock);
 
@@ -69,24 +69,22 @@ bool is_buffer_empty(void)
 /*
  * returns 1 if buffer full
  * */
-unsigned char buffer_append(char c);
+bool buffer_append(char c);
 
-unsigned char buffer_append(char c)
+bool buffer_append(char c)
 {
     ASSERT(is_full == 0);
 
-    msg("appending %c\n", c);
+    buffer[tail] = c;
+    tail++;
 
     if (tail > (sizeof(buffer) / sizeof(buffer[0]) - 1)) {
         tail = 0;
     }
 
-    buffer[tail] = c;
-    tail++;
-
     if (head == tail)
     {
-        is_full = 1;
+        is_full = true;
     }
 
     return is_full;
@@ -108,9 +106,10 @@ void buffer_append_synchronized(char c)
     }
 
     buffer_append(c);
+    msg("write %c from %s\n", c, thread_current()->name);
 
-    msg ("signal not empty %s \n", thread_current()->name);
-    cond_broadcast(&not_empty_cond, &buffer_lock);
+    //msg ("signal not empty %s \n", thread_current()->name);
+    cond_signal(&not_empty_cond, &buffer_lock);
 
     //msg ("release bufferlock %s \n", thread_current()->name);
     lock_release(&buffer_lock);
@@ -143,8 +142,8 @@ char buffer_take_front_synchronized()
     lock_acquire(&buffer_lock);
 
     while (is_buffer_empty()) {
-        msg ("wait for not empty %s \n", thread_current()->name);
-        msg ("wait for not empty %16s \n", buffer);
+        //msg ("wait for not empty %s \n", thread_current()->name);
+        //msg ("wait for not empty %16s \n", buffer);
 
         cond_wait(&not_empty_cond, &buffer_lock);
         //msg ("wating is over for not empty %s \n", thread_current()->name);
