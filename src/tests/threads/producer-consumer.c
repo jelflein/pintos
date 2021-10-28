@@ -152,7 +152,7 @@ char buffer_take_front_synchronized()
     char ret = buffer_take_front();
 
     //msg ("signal not full %s \n", thread_current()->name);
-    cond_broadcast(&not_full_cond, &buffer_lock);
+    cond_signal(&not_full_cond, &buffer_lock);
 
     //msg ("release bufferlock %s \n", thread_current()->name);
     lock_release(&buffer_lock);
