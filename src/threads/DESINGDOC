@@ -84,16 +84,25 @@ mode to THREAD_READY.
 
 >> B1: How does your solution guarantee that consumers will hold until
 >> there is something to consume in the buffer?
+Using a condition variable that is waited on (cond_wait) when the buffer is currently empty.
+The condition is signaled after another thread writes a char to the buffer.
+Accesses to the buffer (reads and writes) are guarded by a single lock which is also used for signaling.
 
 >> B2: How does your solution guarantee that producers will hold until
 >> there is some free space in the buffer?
+Using another condition variable that is waited on when the buffer is currently full.
+This condition is signaled after some other thread reads and discards one item from the buffer.
+Accesses to the buffer (reads and writes) are guarded by a single lock which is also used for signaling.
 
 >> B3: How does your solution preserve a FIFO semantics i.e., the first
 >> character produced will be the first to be consumed?
+Our circular buffer works like a circular queue. Chars are always inserted at the tail and read from the head.
+This results in FIFO semantics.
 
 ---- RATIONALE ----
 
 >> B4: Give an intuition for why your program preserves safety.
+
 
 >> B5: Why did you choose this design? Did you consider other design
 >> alternatives? In what ways is it superior to another design you considered?
