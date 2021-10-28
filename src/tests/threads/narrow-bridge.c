@@ -13,16 +13,16 @@ void CrossBridge(char direc,char prio);
 void ExitBridge(char direc,char prio);
 void init();
 
-struct semaphore waiting_for_prio;
+static struct semaphore cars_right;
+static struct semaphore cars_left;
+
 static struct semaphore bridge_capacity;
-static uint8_t capacity;
+
+static struct semaphore prio_left;
+static struct semaphore prio_right;
 
 //0 = left, 1 = right
 static uint8_t current_direc;
-
-struct semaphore bridge;
-
-static struct list car_threads;
 
 
 void narrow_bridge(unsigned int num_vehicles_left, unsigned int num_vehicles_right,
@@ -50,10 +50,9 @@ void test_narrow_bridge(void)
 }
 
 void init() {
-    sema_init(&waiting_for_prio, 0);
+    sema_init(&waiting_for_other_direc, 0);
     sema_init(&bridge_capacity, 3);
-
-    sema_init(&bridge, 0);
+    sema_init(&prio_other_direc, 0);
 
     current_direc = 0;
 }
@@ -67,36 +66,61 @@ void narrow_bridge(UNUSED unsigned int num_vehicles_left, UNUSED unsigned int nu
 }
 
 void ArriveBridge(char direc, char prio) {
-    sema_down(&bridge);
-
     if(prio) {
-        //prüfen ob alles i.O. ist
-        if(current_direc == direc && capacity < 3) {
-            capacity++;
-            CrossBridge(direc, 0);
-        } else {
-            //wenn nicht flag setzen, dass keine mehr angenommen werden
-            sema_down(&waiting_for_prio);
-        }
+        if(direc == 0 && bridge_capacity.value != 0) sema_down(&prio_left);
+        else if(bridge_capacity.value != 0) sema_down(&prio_right);
+
+        CrossBridge(direc, 0);
+        return;
     }
 
     if(current_direc != direc) {
-        //prüfen ob richtung geändert werden kann
-        //wenn nicht sleep
+        if(direc == 0 && bridge_capacity.value != 0) {
+            sema_down(&cars_left);
+        } else if(direc == 0) {
+            current_direc = 0;
+        }
+
+        if(direc == 1 && bridge_capacity.value != 0) {
+            sema_down(&cars_right);
+        } else if(direc == 1) {
+            current_direc = 1;
+        }
     }
 
     sema_down(&bridge_capacity);
-
-    CrossBridge(direc, 0);
+    CrossBridge(direc, prio);
 }
 
 void CrossBridge(char direc,char prio) {
-
+    //sleep
+    ExitBridge(direc, prio);
 }
 
 void ExitBridge(char direc,char prio) {
-    sema_down(&bridge);
+    if(current_direc == 0 && !list_empty(&prio_left.waiters)) {
+        sema_up(&prio_left);
+    }
+
+    if(current_direc == 1 && !list_empty(&prio_right.waiters)) {
+        sema_up(&prio_right);
+    }
 
     sema_up(&bridge_capacity);
-    sema_up(&bridge);
+
+    if(bridge_capacity.value == 3 && list_empty(&bridge_capacity.waiters)) {
+        struct semaphore invert_direc_sema;
+
+        if(current_direc == 0) {
+            invert_direc_sema = cars_right;
+            current_direc = 1;
+        } else {
+            invert_direc_sema = cars_left;
+            current_direc = 0;
+        }
+
+        while (!list_empty(&invert_direc_sema.waiters)) {
+            sema_up(&invert_direc_sema);
+        }
+    }
 }
