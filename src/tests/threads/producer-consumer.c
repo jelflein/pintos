@@ -33,7 +33,7 @@ void test_producer_consumer(void)
 static char buffer[16];
 static unsigned int head;
 static unsigned int tail;
-static bool is_full;
+static volatile bool is_full;
 
 static struct lock buffer_lock;
 
@@ -184,9 +184,10 @@ void producer_thread(UNUSED void *info)
         place_char(msg[i]);
     }
 }
-void consumer_thread(UNUSED void *info);
 
-void consumer_thread(UNUSED void *info)
+_Noreturn void consumer_thread(UNUSED void *info);
+
+_Noreturn void consumer_thread(UNUSED void *info)
 {
     // read characters forever. If no character available, wait until there is
     for (;;) {

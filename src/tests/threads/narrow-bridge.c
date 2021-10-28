@@ -8,6 +8,22 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 
+void ArriveBridge(char direc,char prio);
+void CrossBridge(char direc,char prio);
+void ExitBridge(char direc,char prio);
+void init();
+
+struct semaphore waiting_for_prio;
+static struct semaphore bridge_capacity;
+static uint8_t capacity;
+
+//0 = left, 1 = right
+static uint8_t current_direc;
+
+struct semaphore bridge;
+
+static struct list car_threads;
+
 
 void narrow_bridge(unsigned int num_vehicles_left, unsigned int num_vehicles_right,
         unsigned int num_emergency_left, unsigned int num_emergency_right);
@@ -33,12 +49,54 @@ void test_narrow_bridge(void)
     pass();
 }
 
+void init() {
+    sema_init(&waiting_for_prio, 0);
+    sema_init(&bridge_capacity, 3);
+
+    sema_init(&bridge, 0);
+
+    current_direc = 0;
+}
 
 void narrow_bridge(UNUSED unsigned int num_vehicles_left, UNUSED unsigned int num_vehicles_right,
         UNUSED unsigned int num_emergency_left, UNUSED unsigned int num_emergency_right)
 {
+    init();
     msg("NOT IMPLEMENTED");
     /* FIXME implement */
 }
 
+void ArriveBridge(char direc, char prio) {
+    sema_down(&bridge);
 
+    if(prio) {
+        //prüfen ob alles i.O. ist
+        if(current_direc == direc && capacity < 3) {
+            capacity++;
+            CrossBridge(direc, 0);
+        } else {
+            //wenn nicht flag setzen, dass keine mehr angenommen werden
+            sema_down(&waiting_for_prio);
+        }
+    }
+
+    if(current_direc != direc) {
+        //prüfen ob richtung geändert werden kann
+        //wenn nicht sleep
+    }
+
+    sema_down(&bridge_capacity);
+
+    CrossBridge(direc, 0);
+}
+
+void CrossBridge(char direc,char prio) {
+
+}
+
+void ExitBridge(char direc,char prio) {
+    sema_down(&bridge);
+
+    sema_up(&bridge_capacity);
+    sema_up(&bridge);
+}
