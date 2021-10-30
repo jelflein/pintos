@@ -27,8 +27,6 @@ static struct semaphore okToDriveRight;
 
 #define LIMIT_CARS 3
 
-static uint8_t bridge_capi;
-
 static uint8_t driving_left_count;
 static uint8_t driving_right_count;
 
@@ -64,14 +62,11 @@ void init() {
     sema_init(&okToDriveLeft, 0);
     sema_init(&okToDriveRight, 0);
 
-    bridge_direc = 0;
     driving_left_count = 0;
     driving_right_count = 0;
 
     waiting_cars_left = 0;
     waiting_cars_right = 0;
-
-    bridge_capi = 0;
 
     change_direc = false;
 }
@@ -163,8 +158,6 @@ void ArriveBridge(char direc, bool prio) {
 }
 
 void CrossBridge(char direc, bool prio) {
-    //msg("WAITING: %s\n", thread_current()->name);
-
     if (direc == 0) { //left
         if (prio) {
             sema_down(&mutex);
@@ -195,33 +188,30 @@ void CrossBridge(char direc, bool prio) {
         else sema_down(&okToDriveRight);
     }
 
-    bridge_capi++;
-
-    ASSERT(bridge_capi <= LIMIT_CARS);
-
     msg("CROSSING: %s\n", thread_current()->name);
     timer_msleep(1000 + (random_ulong() % 2000));
 
-    bridge_capi--;
     ExitBridge(direc, prio);
 }
 
-void ExitBridge(char direc, bool prio) {
-    sema_down(&mutex);
-
+void ExitBridge(char direc, UNUSED bool prio) {
     msg("EXIT: %s\n", thread_current()->name);
+
+    sema_down(&mutex);
 
     if (direc == 0) //left
     {
         driving_left_count--;
 
-        if (waiting_cars_left > 0) {
+        if (waiting_cars_left > 0 && !change_direc) {
             sema_up(&okToDriveLeft);
             driving_left_count++;
             waiting_cars_left--;
         }
 
         if (driving_left_count == 0) {
+            if (change_direc) change_direc = 0;
+
             while (waiting_cars_right > 0 && driving_right_count < LIMIT_CARS) {
                 sema_up(&okToDriveRight);
                 driving_right_count++;
@@ -238,6 +228,8 @@ void ExitBridge(char direc, bool prio) {
         }
 
         if (driving_right_count == 0) {
+            if (change_direc) change_direc = 0;
+
             while (waiting_cars_left > 0 && driving_left_count < LIMIT_CARS) {
                 sema_up(&okToDriveLeft);
                 driving_left_count++;
