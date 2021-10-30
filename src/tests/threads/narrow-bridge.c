@@ -3,15 +3,19 @@
  */
 
 #include <stdio.h>
+#include "devices/timer.h"
 #include "tests/threads/tests.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 
-void ArriveBridge(char direc,char prio);
-void CrossBridge(char direc,char prio);
-void ExitBridge(char direc,char prio);
-void init();
+void ArriveBridge(char direc, bool prio);
+
+void CrossBridge(char direc, bool prio);
+
+void ExitBridge(char direc, bool prio);
+
+void init(void);
 
 static struct semaphore cars_right;
 static struct semaphore cars_left;
@@ -45,24 +49,79 @@ void test_narrow_bridge(void)
     narrow_bridge(22, 22, 10, 10);
     narrow_bridge(0, 0, 11, 12);
     narrow_bridge(0, 10, 0, 10);*/
-    narrow_bridge(0, 10, 10, 0);
+    narrow_bridge(7, 4, 0, 0);
     pass();
 }
 
 void init() {
-    sema_init(&waiting_for_other_direc, 0);
-    sema_init(&bridge_capacity, 3);
-    sema_init(&prio_other_direc, 0);
+    sema_init(&mutex, 1);
 
-    current_direc = 0;
+    sema_init(&okToDriveLeft, 0);
+    sema_init(&okToDriveRight, 0);
+
+    bridge_direc = 0;
+    driving_left_count = 0;
+    driving_left_count = 0;
+
+    waiting_cars_left = 0;
+    waiting_cars_right = 0;
+
+    bridge_capi = 0;
+}
+
+enum car_purpose {
+    LEFT,
+    EMERGENCY_LEFT,
+    RIGHT,
+    EMERGENCY_RIGHT
+};
+
+void car_thread(UNUSED void *info);
+
+void car_thread(UNUSED void *info) {
+    enum car_purpose purpose = (enum car_purpose) info;
+
+    msg("thread starting %s with purpose %u\n", thread_current()->name, purpose);
+
+    unsigned char direction = (purpose == RIGHT) || (purpose == EMERGENCY_RIGHT);
+    bool hasPrio = (purpose == EMERGENCY_LEFT) || (purpose == EMERGENCY_RIGHT);
+
+    ArriveBridge(direction, hasPrio);
 }
 
 void narrow_bridge(UNUSED unsigned int num_vehicles_left, UNUSED unsigned int num_vehicles_right,
         UNUSED unsigned int num_emergency_left, UNUSED unsigned int num_emergency_right)
 {
     init();
-    msg("NOT IMPLEMENTED");
-    /* FIXME implement */
+
+    enum car_purpose purpose = LEFT;
+
+    for (unsigned i = 0; i < num_vehicles_left; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "car left %d", i);
+        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+    }
+
+    purpose = RIGHT;
+    for (unsigned i = 0; i < num_vehicles_right; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "car right %d", i);
+        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+    }
+
+    purpose = EMERGENCY_LEFT;
+    for (unsigned i = 0; i < num_emergency_left; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "emergen left %d", i);
+        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+    }
+
+    purpose = EMERGENCY_RIGHT;
+    for (unsigned i = 0; i < num_emergency_right; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "emergen right %d", i);
+        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+    }
 }
 
 void ArriveBridge(char direc, char prio) {
@@ -86,6 +145,14 @@ void ArriveBridge(char direc, char prio) {
         } else if(direc == 1) {
             current_direc = 1;
         }
+    } else //right
+    {
+        if (waiting_cars_left + driving_left_count == 0 && driving_right_count < LIMIT_CARS) {
+            sema_up(&okToDriveRight);
+            driving_right_count++;
+        } else {
+            waiting_cars_right++;
+        }
     }
 
     sema_down(&bridge_capacity);
@@ -97,13 +164,44 @@ void CrossBridge(char direc,char prio) {
     ExitBridge(direc, prio);
 }
 
-void ExitBridge(char direc,char prio) {
-    if(current_direc == 0 && !list_empty(&prio_left.waiters)) {
-        sema_up(&prio_left);
-    }
+void ExitBridge(char direc, bool prio) {
+    sema_down(&mutex);
 
-    if(current_direc == 1 && !list_empty(&prio_right.waiters)) {
-        sema_up(&prio_right);
+    msg("EXIT: %s\n", thread_current()->name);
+
+    if (direc == 0) //left
+    {
+        driving_left_count--;
+
+        if (waiting_cars_left > 0) {
+            sema_up(&okToDriveLeft);
+            driving_left_count++;
+            waiting_cars_left--;
+        }
+
+        if (driving_left_count == 0) {
+            while (waiting_cars_right > 0 && driving_right_count < LIMIT_CARS) {
+                sema_up(&okToDriveRight);
+                driving_right_count++;
+                waiting_cars_right--;
+            }
+        }
+    } else { //right
+        driving_right_count--;
+
+        if (waiting_cars_right > 0) {
+            sema_up(&okToDriveRight);
+            driving_right_count++;
+            waiting_cars_right--;
+        }
+
+        if (driving_right_count == 0) {
+            while (waiting_cars_left > 0 && driving_left_count < LIMIT_CARS) {
+                sema_up(&okToDriveLeft);
+                driving_left_count++;
+                waiting_cars_left--;
+            }
+        }
     }
 
     sema_up(&bridge_capacity);
