@@ -34,11 +34,14 @@ struct thread
     ... we added the following struct members
     int64_t time_to_sleep;
     char is_sleep_activated;
+    struct semaphore sleep_sema;
     ...
   }
 
 is_sleep_activated is a boolean where true indicates a running sleep timer.
 time_to_sleep is an int which keeps track of the remaining ticks to sleep.
+sleep_sema is the semaphore for sleeping (in thread_sleep) and waking up in the timer interrupt
+ when the timer is triggered. It is initialized to 0.
 
 
 ---- ALGORITHMS ----
@@ -49,33 +52,53 @@ time_to_sleep is an int which keeps track of the remaining ticks to sleep.
 
 we set the current threads time_to_sleep to the desired sleep time.
 Then we mark the thread as sleeping by setting is_sleep_activated to true.
-Finally we suspend the thread.
+Finally we suspend the thread by waiting on the threads sleep semaphore using sema_down(&thread->sleep_sema)
 
 Inside the periodically-called timer interrupt handler, we go through all threads
 using the thread_foreach function. For every thread, we check if the thread is
 currently sleeping (state = THREAD_BLOCKED && is_sleep_activated).
 If it is, we decrement the time_to_sleep by one.
-If time_to_sleep is 0, we set is_sleep_activated to false and change the thread
-mode to THREAD_READY.
+If time_to_sleep is 0, we set is_sleep_activated to false and wake the thread up using the semaphore sema_up.
 
+The thread_foreach function is not the best impl, because every thread will iterate. You can use a sorted list with all
+sleeping threads.
 
 
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
+In the timer interrupt handler, we do only the work that is necessary to wake up sleeping threads.
+ We only go through the threads to update sleep timers and wake up threads with expired timers.
+ The waking process only involves calling sema_up(), which returns immediately as opposed to blocking.
 
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
+Each thread has their own data structures to keep track of their running timer and to wake them up again.
+Therefore there can be no data races between threads calling thread_sleep.
 
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+We update our thread data structures in a specific order. We first set a threads time_to_sleep and after
+that is_sleep_activated.
+Finally the threads waits on the semaphore.
+
+current_thread->time_to_sleep = ticks;
+current_thread->is_sleep_activated = 1;
+sema_down(&current_thread->sleep_sema);
+
+This way a timer interrupt during the function cannot have adverse effects. The timer interrupt ignores threads where
+is_sleep_activated is not 1.
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
 
+Our first approach was thread_block(), but this was too low level. This is the reason, why we have chosen sema_down
+and sema_up,
+because it manages the interrupts automagically correct. With our old approach we were experiencing problems managing
+the interrupts ourselves.
 
     		     PROD/CONS
 	  		     =========
@@ -102,11 +125,15 @@ This results in FIFO semantics.
 ---- RATIONALE ----
 
 >> B4: Give an intuition for why your program preserves safety.
-
+We use a lock to make sure only one thread may write to the shared data structures at any one time.
 
 >> B5: Why did you choose this design? Did you consider other design
 >> alternatives? In what ways is it superior to another design you considered?
-
+We first thought about using a few locks in combination, instead of using condition variables.
+It turned out that using condition variables made the code much simpler and more easy to understand and maintain.
+The logic complexity when only using locks was exploding very quickly.
+In addition, the locks in Pintos may only be unlocked from the same thread that locked them. We assumed this was not
+the case for our first approach.
 
 			     NARROW BRIDGE
 			     =============
@@ -115,25 +142,52 @@ This results in FIFO semantics.
 
 >> C1: How does your solution guarantee that no more that 3 vehicles
 >> are crossing the bridge in the same direction?
+We use two var. "driving_left_count" and "driving_left_count", accesses to which are guarded by a
+ mutex (binary semaphore).
+ When a car arrives, it checks the variable like this: driving_left_count < LIMIT_CARS (and similar for right dir).
+ Further cars have to wait on a semaphore okToDriveLeft or okToDriveRight.
+ The logic is similar to the reader-writer lock from the lecture.
+
 
 >> C2: What prevents vehicles from opposite directions from crossing the
 >> bridge simultaneously?
+Arriving vehicles check the data structures to make sure no opposing traffic exists.
+But if there is opposing traffic, the thread will wait on a semaphore.
+The semaphore will be signaled by the last car to exit the bridge in the opposing direction.
 
 >> C3: How does your solution grant priority to emergency vehicles over
 >> the queue of vehicles ahead in the same direction?
+We impl. a special function "sema_down_push_front" is the same as sema_down,
+but the thread will insert to the front of the list. If an emergency vehicle occurs from the
+other direc. we will change the direction with a var.
 
 >> C4: How do you guarantee that despite having priority, emergency vehicles
 >> do not start crossing the bridge while there are still vehicles crossing
->> it in the oposite direction?
+>> it in the opposite direction?
+Emergency vehicles wait like any other car to avoid collisions. The difference is that
+1) they jump to the front of the waiting queue as explained above
+2) they can signal a direction change, that means no car from the opposing direction will enter onto the bridge
+when this signal exists. (variable change_direc in the code)
 
 >> C5: Explain with examples why your solution does not preserve neither
 >> fairness nor freedom from starvation, other than what has been indicated
 >> for emergency vehicles.
+Our solution will let waiting cars, which wait to cross the bridge in the direction of the current bridge traffic,
+pass the bridge before any car from the opposing direction will pass (exception: emergency vehicle).
+That is the case even if those cars arrived later than the waiting cars in the opposite direction.
+
+Starvation:
+The explanation above is also the reason why the cars waiting in the opposite direction may have to wait forever:
+If the traffic in the current direction never stops, then the waiting cars for the opposite direction will never
+get to cross the bridge.
 
 ---- RATIONALE ----
 
 >> C6: Why did you choose this design? Did you consider other design
 >> alternatives? In what ways is it superior to another design you considered?
+Antoine explained this design very well in the course (reader writer lock). We abstract the relevant parts for us.
+ We changed the view of the read / write problem. This design seems fairly elegant so we did not try to come up
+ with an alternative design.
 
 
 			   SURVEY QUESTIONS
@@ -147,15 +201,20 @@ the semester.
 
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
+It was hard to get started with Pintos. Also to set up an IDE etc. But
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+The interrupt handling was particularly important to understand.
 
 >> Is there some particular fact or hint we should give students in
 >> future semesters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
+Maybe the tip to use semaphores to implement timer_sleep.
 
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future semesters or the remaining projects?
+I asked the professor after the lecture so no idea about the TAs at this point.
 
 >> Any other comments?
+-
