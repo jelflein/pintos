@@ -94,8 +94,8 @@ timer_sleep(int64_t ticks) {
 
     struct thread *current_thread = thread_current();
 
-    current_thread->is_sleep_activated = 1;
     current_thread->time_to_sleep = ticks;
+    current_thread->is_sleep_activated = 1;
 
     sema_down(&current_thread->sleep_sema);
 }
