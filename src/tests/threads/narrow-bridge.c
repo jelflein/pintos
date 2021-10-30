@@ -3,6 +3,7 @@
  */
 
 #include <stdio.h>
+#include <random.h>
 #include "devices/timer.h"
 #include "tests/threads/tests.h"
 #include "threads/malloc.h"
@@ -17,24 +18,28 @@ void ExitBridge(char direc, bool prio);
 
 void init(void);
 
-static struct semaphore cars_right;
-static struct semaphore cars_left;
+static uint8_t waiting_cars_right;
+static uint8_t waiting_cars_left;
 
-static struct semaphore bridge_capacity;
+static struct semaphore mutex;
+static struct semaphore okToDriveLeft;
+static struct semaphore okToDriveRight;
 
-static struct semaphore prio_left;
-static struct semaphore prio_right;
+#define LIMIT_CARS 3
 
-//0 = left, 1 = right
-static uint8_t current_direc;
+static uint8_t bridge_capi;
+
+static uint8_t driving_left_count;
+static uint8_t driving_right_count;
+
+static bool change_direc;
 
 
 void narrow_bridge(unsigned int num_vehicles_left, unsigned int num_vehicles_right,
-        unsigned int num_emergency_left, unsigned int num_emergency_right);
+                   unsigned int num_emergency_left, unsigned int num_emergency_right);
 
 
-void test_narrow_bridge(void)
-{
+void test_narrow_bridge(void) {
     /*narrow_bridge(0, 0, 0, 0);
     narrow_bridge(1, 0, 0, 0);
     narrow_bridge(0, 0, 0, 1);
@@ -49,7 +54,7 @@ void test_narrow_bridge(void)
     narrow_bridge(22, 22, 10, 10);
     narrow_bridge(0, 0, 11, 12);
     narrow_bridge(0, 10, 0, 10);*/
-    narrow_bridge(7, 4, 0, 0);
+    narrow_bridge(11, 4, 0, 3);
     pass();
 }
 
@@ -61,12 +66,14 @@ void init() {
 
     bridge_direc = 0;
     driving_left_count = 0;
-    driving_left_count = 0;
+    driving_right_count = 0;
 
     waiting_cars_left = 0;
     waiting_cars_right = 0;
 
     bridge_capi = 0;
+
+    change_direc = false;
 }
 
 enum car_purpose {
@@ -86,12 +93,16 @@ void car_thread(UNUSED void *info) {
     unsigned char direction = (purpose == RIGHT) || (purpose == EMERGENCY_RIGHT);
     bool hasPrio = (purpose == EMERGENCY_LEFT) || (purpose == EMERGENCY_RIGHT);
 
+    if (hasPrio) {
+        //timer_msleep(6000);
+        msg("%s now waiting\n", thread_current()->name);
+    }
+
     ArriveBridge(direction, hasPrio);
 }
 
-void narrow_bridge(UNUSED unsigned int num_vehicles_left, UNUSED unsigned int num_vehicles_right,
-        UNUSED unsigned int num_emergency_left, UNUSED unsigned int num_emergency_right)
-{
+void narrow_bridge(unsigned int num_vehicles_left, unsigned int num_vehicles_right,
+                   unsigned int num_emergency_left, unsigned int num_emergency_right) {
     init();
 
     enum car_purpose purpose = LEFT;
@@ -124,26 +135,16 @@ void narrow_bridge(UNUSED unsigned int num_vehicles_left, UNUSED unsigned int nu
     }
 }
 
-void ArriveBridge(char direc, char prio) {
-    if(prio) {
-        if(direc == 0 && bridge_capacity.value != 0) sema_down(&prio_left);
-        else if(bridge_capacity.value != 0) sema_down(&prio_right);
+void ArriveBridge(char direc, bool prio) {
+    sema_down(&mutex);
 
-        CrossBridge(direc, 0);
-        return;
-    }
-
-    if(current_direc != direc) {
-        if(direc == 0 && bridge_capacity.value != 0) {
-            sema_down(&cars_left);
-        } else if(direc == 0) {
-            current_direc = 0;
-        }
-
-        if(direc == 1 && bridge_capacity.value != 0) {
-            sema_down(&cars_right);
-        } else if(direc == 1) {
-            current_direc = 1;
+    if (direc == 0) //left
+    {
+        if (waiting_cars_right + driving_right_count == 0 && driving_left_count < LIMIT_CARS) {
+            sema_up(&okToDriveLeft);
+            driving_left_count++;
+        } else {
+            waiting_cars_left++;
         }
     } else //right
     {
@@ -155,12 +156,53 @@ void ArriveBridge(char direc, char prio) {
         }
     }
 
-    sema_down(&bridge_capacity);
+    sema_up(&mutex);
+
+
     CrossBridge(direc, prio);
 }
 
-void CrossBridge(char direc,char prio) {
-    //sleep
+void CrossBridge(char direc, bool prio) {
+    //msg("WAITING: %s\n", thread_current()->name);
+
+    if (direc == 0) { //left
+        if (prio) {
+            sema_down(&mutex);
+
+            if (driving_right_count > 0) {
+                //change direc
+                change_direc = true;
+            }
+
+            sema_up(&mutex);
+
+            sema_down_push_front(&okToDriveLeft);
+        }
+        else sema_down(&okToDriveLeft);
+    } else { //right
+        if (prio) {
+            sema_down(&mutex);
+
+            if (driving_left_count > 0) {
+                //change direc
+                change_direc = true;
+            }
+
+            sema_up(&mutex);
+
+            sema_down_push_front(&okToDriveRight);
+        }
+        else sema_down(&okToDriveRight);
+    }
+
+    bridge_capi++;
+
+    ASSERT(bridge_capi <= LIMIT_CARS);
+
+    msg("CROSSING: %s\n", thread_current()->name);
+    timer_msleep(1000 + (random_ulong() % 2000));
+
+    bridge_capi--;
     ExitBridge(direc, prio);
 }
 
@@ -189,7 +231,7 @@ void ExitBridge(char direc, bool prio) {
     } else { //right
         driving_right_count--;
 
-        if (waiting_cars_right > 0) {
+        if (waiting_cars_right > 0 && !change_direc) {
             sema_up(&okToDriveRight);
             driving_right_count++;
             waiting_cars_right--;
@@ -204,21 +246,5 @@ void ExitBridge(char direc, bool prio) {
         }
     }
 
-    sema_up(&bridge_capacity);
-
-    if(bridge_capacity.value == 3 && list_empty(&bridge_capacity.waiters)) {
-        struct semaphore invert_direc_sema;
-
-        if(current_direc == 0) {
-            invert_direc_sema = cars_right;
-            current_direc = 1;
-        } else {
-            invert_direc_sema = cars_left;
-            current_direc = 0;
-        }
-
-        while (!list_empty(&invert_direc_sema.waiters)) {
-            sema_up(&invert_direc_sema);
-        }
-    }
+    sema_up(&mutex);
 }
