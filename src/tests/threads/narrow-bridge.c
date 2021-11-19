@@ -21,6 +21,9 @@ void init(void);
 static uint8_t waiting_cars_right;
 static uint8_t waiting_cars_left;
 
+static uint8_t waiting_prio_left;
+static uint8_t waiting_prio_right;
+
 static struct semaphore mutex;
 static struct semaphore okToDriveLeft;
 static struct semaphore okToDriveRight;
@@ -52,7 +55,7 @@ void test_narrow_bridge(void) {
     narrow_bridge(22, 22, 10, 10);
     narrow_bridge(0, 0, 11, 12);
     narrow_bridge(0, 10, 0, 10);*/
-    narrow_bridge(11, 4, 0, 3);
+    narrow_bridge(11, 4, 6, 3);
     pass();
 }
 
@@ -67,6 +70,9 @@ void init() {
 
     waiting_cars_left = 0;
     waiting_cars_right = 0;
+
+    waiting_prio_left = 0;
+    waiting_prio_right = 0;
 
     change_direc = false;
 }
@@ -139,6 +145,7 @@ void ArriveBridge(char direc, bool prio) {
             sema_up(&okToDriveLeft);
             driving_left_count++;
         } else {
+            if(prio) waiting_prio_left++;
             waiting_cars_left++;
         }
     } else //right
@@ -147,6 +154,7 @@ void ArriveBridge(char direc, bool prio) {
             sema_up(&okToDriveRight);
             driving_right_count++;
         } else {
+            if(prio) waiting_prio_right++;
             waiting_cars_right++;
         }
     }
@@ -203,10 +211,12 @@ void ExitBridge(char direc, UNUSED bool prio) {
     {
         driving_left_count--;
 
-        if (waiting_cars_left > 0 && !change_direc) {
+        if ((waiting_cars_left > 0 && !change_direc) || waiting_prio_left > 0) {
             sema_up(&okToDriveLeft);
             driving_left_count++;
             waiting_cars_left--;
+
+            if(waiting_prio_left > 0) waiting_prio_left--;
         }
 
         if (driving_left_count == 0) {
@@ -221,10 +231,12 @@ void ExitBridge(char direc, UNUSED bool prio) {
     } else { //right
         driving_right_count--;
 
-        if (waiting_cars_right > 0 && !change_direc) {
+        if ((waiting_cars_right > 0 && !change_direc)|| waiting_prio_right > 0) {
             sema_up(&okToDriveRight);
             driving_right_count++;
             waiting_cars_right--;
+
+            if(waiting_prio_right > 0) waiting_prio_right--;
         }
 
         if (driving_right_count == 0) {
