@@ -19,14 +19,24 @@
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (const char *file_name, void (**eip) (void), void **esp,
+                  const char *arg_line);
+
+
+#define NUM_ARGS_LIMIT 32
+#define ARG_SIZE_LIMIT 32
+#define PROGRAM_NAME_SIZE_LIMIT 64
+struct process_arguments {
+    char file_name[PROGRAM_NAME_SIZE_LIMIT];
+    char args[ARG_SIZE_LIMIT][NUM_ARGS_LIMIT];
+};
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
@@ -41,16 +51,30 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
   return tid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *cmdline_ptr)
 {
-  char *file_name = file_name_;
+  const char *cmdline = (const char *)cmdline_ptr;
+
+  char *file_name = palloc_get_page(0);
+  if (file_name == NULL)
+    while (true);
+
+  char *file_name_end_position = strchr(cmdline, ' ');
+  if (file_name_end_position == NULL)
+  {
+    file_name_end_position = (char *)cmdline + strlen(cmdline);
+  }
+  unsigned file_name_size = file_name_end_position - cmdline;
+  strlcpy(&file_name[0], cmdline, file_name_size + 1);
+  file_name[file_name_size] = '\0';
+
   struct intr_frame if_;
   bool success;
 
@@ -59,7 +83,7 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (&file_name[0], &if_.eip, &if_.esp, cmdline);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -195,7 +219,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, const char *cmdline);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -206,7 +230,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *file_name, void (**eip) (void), void **esp, const char
+*arg_line)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -214,6 +239,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+
+  //const char *file_name =
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -302,7 +329,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, arg_line))
     goto done;
 
   /* Start address. */
@@ -427,19 +454,69 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, const char *arg_line)
 {
   uint8_t *kpage;
   bool success = false;
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
+  if (kpage != NULL)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
+      if (success) {
         *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
+        //daten drauf
+        char *current_stack_bottom = PHYS_BASE;
+
+        //calc. the start of the address space (argv)
+        void *address_space = current_stack_bottom - strlen(arg_line);
+        // word-align test it!!
+        address_space -= ((unsigned) address_space) % 4;
+        // write terminating sentinel of argv
+        char **argv = address_space;
+        *argv = 0;
+        argv--;
+        // write addresses of the arguments here
+        unsigned int argc = 0;
+        unsigned last_not_space_pos = 0;
+
+        for (unsigned i = 0; i < strlen(arg_line); i++) {
+          if (arg_line[i] == ' ') {
+            if (i > 0 && arg_line[i - 1] == ' ') {
+              last_not_space_pos++;
+              continue;
+            }
+
+            // null terminating character
+            *current_stack_bottom = 0;
+            current_stack_bottom -= 1;
+
+            unsigned arg_size = i - last_not_space_pos - 1;
+            strlcpy(current_stack_bottom - arg_size, arg_line +
+                                                     last_not_space_pos,
+                    arg_size);
+            current_stack_bottom -= arg_size;
+
+
+            last_not_space_pos = i + 1;
+            argc++;
+          }
+        }
+
+
+        // argv on the stack (make sure it points to argv[0]
+        *argv = (char *) (argv + 1);
+        argv -= 1;
+        //argc on the stack
+        *argv = (char *) argc;
+        argv -= 1;
+        //return address of the stack
+        *argv = 0;
+        *esp = argv;
+      }
+      else {
+        palloc_free_page(kpage);
+      }
     }
   return success;
 }
