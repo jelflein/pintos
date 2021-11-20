@@ -451,6 +451,37 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
+static unsigned countParams(const char *str)
+{
+  bool space_before = false;
+  unsigned ret = 0;
+
+  //echo
+  //echo
+  //echo x
+  for (unsigned i = 0; i < strlen(str); i++)
+  {
+    char c = str[i];
+    if (c == ' ' && !space_before)
+    {
+      ret++;
+    }
+
+    if (i == strlen(str) - 1 && c != ' ') {
+      ret++;
+    }
+
+    if (c == ' ')
+    {
+      space_before = true;
+    }
+    else
+      space_before = false;
+  }
+
+  return ret;
+}
+
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
@@ -461,63 +492,61 @@ setup_stack (void **esp, const char *arg_line)
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL)
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success) {
-        *esp = PHYS_BASE;
-        //daten drauf
-        char *current_stack_bottom = PHYS_BASE;
+  {
+    success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+    if (success) {
+      *esp = PHYS_BASE;
+      //daten drauf
+      char *current_stack_bottom = PHYS_BASE - 4;
 
-        //calc. the start of the address space (argv)
-        void *address_space = current_stack_bottom - strlen(arg_line);
-        // word-align test it!!
-        address_space -= ((unsigned) address_space) % 4;
-        // write terminating sentinel of argv
-        char **argv = address_space;
-        *argv = 0;
+      //calc. the start of the address space (argv)
+      void *address_space = current_stack_bottom - strlen(arg_line);
+      // word-align test it!!
+      address_space -= ((unsigned) address_space) % 4;
+      // write terminating sentinel of argv
+      char **argv = address_space;
+      *argv = 0;
+      argv--;
+      // write addresses of the arguments here
+
+      char *t;
+      char *remainder = (char *)arg_line;
+
+      //char *c;
+      unsigned argc = countParams(arg_line);
+      remainder = (char *)arg_line;
+      
+      char **address_table = argv;
+      address_table -= argc - 1;
+
+      while ((t = strtok_r(remainder, " ", &remainder)) != NULL)
+      {
+        unsigned arg_size = strlen(t);
+        char *string_address = current_stack_bottom - arg_size - 1;
+        strlcpy(string_address, t, arg_size + 1);
+        current_stack_bottom -= arg_size + 1;
+
+        *address_table = string_address;
+        address_table++;
         argv--;
-        // write addresses of the arguments here
-        unsigned int argc = 0;
-        unsigned last_not_space_pos = 0;
-
-        for (unsigned i = 0; i < strlen(arg_line); i++) {
-          if (arg_line[i] == ' ') {
-            if (i > 0 && arg_line[i - 1] == ' ') {
-              last_not_space_pos++;
-              continue;
-            }
-
-            // null terminating character
-            *current_stack_bottom = 0;
-            current_stack_bottom -= 1;
-
-            unsigned arg_size = i - last_not_space_pos - 1;
-            strlcpy(current_stack_bottom - arg_size, arg_line +
-                                                     last_not_space_pos,
-                    arg_size);
-            current_stack_bottom -= arg_size;
-
-
-            last_not_space_pos = i + 1;
-            argc++;
-          }
-        }
-
-
-        // argv on the stack (make sure it points to argv[0]
-        *argv = (char *) (argv + 1);
-        argv -= 1;
-        //argc on the stack
-        *argv = (char *) argc;
-        argv -= 1;
-        //return address of the stack
-        *argv = 0;
-        *esp = argv;
       }
-      else {
-        palloc_free_page(kpage);
-      }
+
+      //argv--;
+      // argv on the stack (make sure it points to argv[0]
+      //point to argument table
+      *argv = (char *) (argv + 1);
+      argv -= 1;
+      //argc on the stack
+      *argv = (char *) argc;
+      argv -= 1;
+      //return address of the stack
+      *argv = 0;
+      *esp = argv;
     }
+    else {
+      palloc_free_page(kpage);
+    }
+  }
   return success;
 }
 
