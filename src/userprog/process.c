@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *file_name, void (**eip) (void), void **esp,
@@ -52,6 +53,7 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
+
   return tid;
 }
 
@@ -85,10 +87,19 @@ start_process (void *cmdline_ptr)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (&file_name[0], &if_.eip, &if_.esp, cmdline);
 
+  thread_current()->has_load_failed = success;
+
+  palloc_free_page(cmdline_ptr);
+  palloc_free_page(file_name);
+
+  // wake up a thread possibly waiting for our startup
+  sema_up(&thread_current()->process_load_sema);
+
   /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  if (!success) {
     thread_exit ();
+  }
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in

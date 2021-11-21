@@ -17,4 +17,10 @@ bool filesys_create (const char *name, off_t initial_size);
 struct file *filesys_open (const char *name);
 bool filesys_remove (const char *name);
 
+struct file_descriptor {
+  int descriptor_id;
+  struct file *f;
+  struct list_elem list_elem;
+};
+
 #endif /* filesys/filesys.h */

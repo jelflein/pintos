@@ -153,6 +153,8 @@ thread_print_stats(void) {
            idle_ticks, kernel_ticks, user_ticks);
 }
 
+#define MIN(a,b) (((a)<(b))?(a):(b))
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
@@ -192,6 +194,21 @@ thread_create(const char *name, int priority,
     t->is_sleep_activated = 0;
     t->time_to_sleep = 0;
     sema_init(&t->sleep_sema, 0);
+
+    /* remember program name from invocation*/
+    char *cmdline = aux;
+    char *file_name_end_position = strchr(cmdline, ' ');
+    if (file_name_end_position == NULL)
+    {
+      file_name_end_position = (char *)cmdline + strlen(cmdline);
+    }
+    unsigned file_name_size = file_name_end_position - cmdline;
+    strlcpy(&t->program_name[0], aux, MIN(32, file_name_size + 1));
+
+    sema_init(&t->process_load_sema, 0);
+    t->has_load_failed = false;
+
+    list_init(t->file_descriptors);
 
     /* Stack frame for kernel_thread(). */
     kf = alloc_frame(t, sizeof *kf);
@@ -568,3 +585,32 @@ allocate_tid(void) {
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(
 struct thread, stack);
+
+
+
+struct find_thread_by_id_callback_params { tid_t needle; struct thread *ret; };
+
+static void find_thread_by_id_callback(struct thread *t, void *p)
+{
+  struct find_thread_by_id_callback_params *params = (struct
+          find_thread_by_id_callback_params *)p;
+
+  if (t->tid == params->needle)
+  {
+    params->ret = t;
+  }
+}
+
+/*
+ * find thread from tid / pid
+ * */
+struct thread *
+thread_from_tid(tid_t t) {
+  struct find_thread_by_id_callback_params params;
+
+  params.needle = t;
+  params.ret = NULL;
+
+  thread_foreach(find_thread_by_id_callback, (void *)&params);
+  return params.ret;
+}

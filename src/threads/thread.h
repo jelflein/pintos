@@ -102,6 +102,10 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    char program_name[32];
+    struct semaphore process_load_sema;
+    bool has_load_failed;
+    struct list file_descriptors;
 #endif
 
     /* Owned by thread.c. */
@@ -143,5 +147,7 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+struct thread *thread_from_tid(tid_t t);
 
 #endif /* threads/thread.h */
