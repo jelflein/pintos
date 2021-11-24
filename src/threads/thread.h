@@ -18,6 +18,14 @@ enum thread_status
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
+
+#ifdef USERPROG
+struct child_result {
+    tid_t pid;
+    int exit_code;
+    struct list_elem elem;
+};
+#endif
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
 
 /* Thread priorities. */
@@ -99,13 +107,18 @@ struct thread
 
     struct semaphore sleep_sema;
 
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     char program_name[32];
     struct semaphore process_load_sema;
+    struct semaphore wait_sema;
     bool has_load_failed;
     struct list file_descriptors;
+    struct list terminated_children;
+    int exit_code;
+    tid_t parent;
 #endif
 
     /* Owned by thread.c. */
@@ -124,7 +137,8 @@ void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
-tid_t thread_create (const char *name, int priority, thread_func *, void *);
+tid_t
+thread_create(const char *name, int priority, thread_func *function, void *aux);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
@@ -149,5 +163,6 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 struct thread *thread_from_tid(tid_t t);
-
+struct child_result *
+thread_terminated_child_from_tid(tid_t tid, struct thread *parent);
 #endif /* threads/thread.h */

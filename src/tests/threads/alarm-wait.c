@@ -90,7 +90,7 @@ test_sleep (int thread_cnt, int iterations)
       t->iterations = 0;
 
       snprintf (name, sizeof name, "thread %d", i);
-      thread_create (name, PRI_DEFAULT, sleeper, t);
+      thread_create(name, PRI_DEFAULT, sleeper, t, 0);
     }
   
   /* Wait long enough for all the threads to finish. */

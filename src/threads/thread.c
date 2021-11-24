@@ -107,6 +107,13 @@ static bool is_thread(struct thread *)UNUSED;
     initial_thread->is_sleep_activated = 0;
     initial_thread->time_to_sleep = 0;
     sema_init(&initial_thread->sleep_sema, 0);
+
+    /* userprogram */
+    list_init(&initial_thread->file_descriptors);
+    list_init(&initial_thread->terminated_children);
+
+    sema_init(&initial_thread->process_load_sema, 0);
+    sema_init(&initial_thread->wait_sema, 0);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -171,8 +178,7 @@ thread_print_stats(void) {
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t
-thread_create(const char *name, int priority,
-              thread_func *function, void *aux) {
+thread_create(const char *name, int priority, thread_func *function, void *aux) {
     struct thread *t;
     struct kernel_thread_frame *kf;
     struct switch_entry_frame *ef;
@@ -206,11 +212,15 @@ thread_create(const char *name, int priority,
     strlcpy(&t->program_name[0], aux, MIN(32, file_name_size + 1));
 
     sema_init(&t->process_load_sema, 0);
+    sema_init(&t->wait_sema, 0);
     t->has_load_failed = false;
 
-    list_init(t->file_descriptors);
+    // user program
+    list_init(&t->file_descriptors);
+    list_init(&t->terminated_children);
+    t->parent = thread_current()->tid;
 
-    /* Stack frame for kernel_thread(). */
+  /* Stack frame for kernel_thread(). */
     kf = alloc_frame(t, sizeof *kf);
     kf->eip = NULL;
     kf->function = function;
@@ -613,4 +623,30 @@ thread_from_tid(tid_t t) {
 
   thread_foreach(find_thread_by_id_callback, (void *)&params);
   return params.ret;
+}
+
+/*
+ * find thread from tid / pid
+ * */
+struct child_result *
+thread_terminated_child_from_tid(tid_t tid, struct thread *parent)
+{
+  struct list_elem *e;
+
+  ASSERT(intr_get_level() == INTR_OFF);
+
+  struct list *l = &parent->terminated_children;
+
+  for (e = list_begin(l); e != list_end(l);
+       e = list_next(e)) {
+    struct child_result *cr = list_entry(e,
+                                  struct child_result, elem);
+
+    if (cr->pid == tid)
+    {
+      return cr;
+    }
+  }
+
+  return NULL;
 }

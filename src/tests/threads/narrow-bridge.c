@@ -111,28 +111,28 @@ void narrow_bridge(unsigned int num_vehicles_left, unsigned int num_vehicles_rig
     for (unsigned i = 0; i < num_vehicles_left; i++) {
         char name[32];
         snprintf(name, sizeof name, "car left %d", i);
-        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+      thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose, 0);
     }
 
     purpose = RIGHT;
     for (unsigned i = 0; i < num_vehicles_right; i++) {
         char name[32];
         snprintf(name, sizeof name, "car right %d", i);
-        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+      thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose, 0);
     }
 
     purpose = EMERGENCY_LEFT;
     for (unsigned i = 0; i < num_emergency_left; i++) {
         char name[32];
         snprintf(name, sizeof name, "emergen left %d", i);
-        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+      thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose, 0);
     }
 
     purpose = EMERGENCY_RIGHT;
     for (unsigned i = 0; i < num_emergency_right; i++) {
         char name[32];
         snprintf(name, sizeof name, "emergen right %d", i);
-        thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose);
+      thread_create(name, PRI_DEFAULT, car_thread, (void *) purpose, 0);
     }
 }
 

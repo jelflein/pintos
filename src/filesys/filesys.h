@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 #include "filesys/off_t.h"
+#include "file.h"
+#include <list.h>
 
 /* Sectors of system file inodes. */
 #define FREE_MAP_SECTOR 0       /* Free map file inode sector. */
