@@ -114,6 +114,9 @@ static bool is_thread(struct thread *)UNUSED;
 
     sema_init(&initial_thread->process_load_sema, 0);
     sema_init(&initial_thread->wait_sema, 0);
+
+    initial_thread->has_load_failed = false;
+    initial_thread->parent = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -621,7 +624,10 @@ thread_from_tid(tid_t t) {
   params.needle = t;
   params.ret = NULL;
 
+  enum intr_level il = intr_get_level();
+  intr_disable();
   thread_foreach(find_thread_by_id_callback, (void *)&params);
+  intr_set_level(il);
   return params.ret;
 }
 

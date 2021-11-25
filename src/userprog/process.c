@@ -86,7 +86,7 @@ start_process(void *cmdline_ptr) {
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load(&file_name[0], &if_.eip, &if_.esp, cmdline);
 
-  thread_current()->has_load_failed = success;
+  thread_current()->has_load_failed = !success;
 
   palloc_free_page(cmdline_ptr);
   palloc_free_page(file_name);
