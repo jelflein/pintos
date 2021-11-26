@@ -639,7 +639,7 @@ thread_terminated_child_from_tid(tid_t tid, struct thread *parent)
 {
   struct list_elem *e;
 
-  ASSERT(intr_get_level() == INTR_OFF);
+  ASSERT(parent == thread_current() || intr_get_level() == INTR_OFF);
 
   struct list *l = &parent->terminated_children;
 

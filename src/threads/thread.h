@@ -24,6 +24,7 @@ struct child_result {
     tid_t pid;
     int exit_code;
     struct list_elem elem;
+    bool has_load_failed;
 };
 #endif
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */

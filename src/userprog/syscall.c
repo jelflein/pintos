@@ -11,6 +11,7 @@
 #include "process.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include <string.h>
 
 #define MIN(a,b)             \
 ({                           \
@@ -50,6 +51,9 @@ void handler_wait(struct intr_frame *);
 void handler_fs_close(struct intr_frame *);
 
 static void handler_exit(int *stack);
+
+NO_RETURN static void
+process_terminate(struct thread *t, int status_code, const char *cmd_line);
 
 struct semaphore file_sema;
 
@@ -131,7 +135,15 @@ static void handler_exit(int *stack) {/*
 
   check_ptr(stack + 1);
   int status_code = *(stack + 1);
-  printf("%s: exit(%d)\n", cmdline, status_code);
+
+  process_terminate(t, status_code, cmdline);
+
+}
+
+NO_RETURN static void
+process_terminate(struct thread *t, int status_code, const char *cmd_line)
+{
+  printf("%s: exit(%d)\n", cmd_line, status_code);
 
   t->exit_code = status_code;
 
@@ -139,6 +151,7 @@ static void handler_exit(int *stack) {/*
   struct child_result *cr = palloc_get_page(0);
   cr->pid = t->tid;
   cr->exit_code = status_code;
+  cr->has_load_failed = t->has_load_failed;
   list_push_back(&parent->terminated_children, &cr->elem);
 
   sema_up(&t->wait_sema);
@@ -244,12 +257,33 @@ void handler_exec(struct intr_frame *f) {
   //sema sleep until loaded
   sema_down(&t->process_load_sema);
   //check if thread failed
-  if (t->has_load_failed) {
-    syscall_ret_value(-1, f);
-    return;
-  }
+  // the thread might be gone by now
+  enum intr_level il = intr_get_level();
+  intr_disable();
+  t = thread_from_tid(pid);
+  if (t == NULL)
+  {
+    // thread already terminated. Look for its data in the parents list
+    struct child_result *terminated_child =
+            thread_terminated_child_from_tid(pid, thread_current());
 
-  syscall_ret_value(pid, f);
+    ASSERT(terminated_child != NULL);
+    syscall_ret_value(terminated_child->has_load_failed ? -1 : pid, f);
+
+    if (terminated_child->has_load_failed)
+    {
+      list_remove(&terminated_child->elem);
+      palloc_free_page(terminated_child);
+    }
+  }
+  else if (t->has_load_failed)
+  {
+    syscall_ret_value(-1, f);
+  }
+  else {
+    syscall_ret_value(pid, f);
+  }
+  intr_set_level(il);
 }
 
 void handler_fs_create(struct intr_frame *f) {
@@ -287,7 +321,7 @@ void handler_fs_remove(struct intr_frame *f) {
 static struct file_descriptor *
 find_file_descriptor(int fd, struct thread *thread) {
   struct list_elem *e;
-  ASSERT(intr_get_level() == INTR_OFF);
+  ASSERT( thread == thread_current() || intr_get_level() == INTR_OFF);
 
   for (e = list_begin(&thread->file_descriptors);
     e != list_end(&thread->file_descriptors);

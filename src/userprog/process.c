@@ -96,6 +96,21 @@ start_process(void *cmdline_ptr) {
 
   /* If load failed, quit. */
   if (!success) {
+    struct thread *t = thread_current();
+
+    struct child_result *cr = palloc_get_page(0);
+    cr->pid = t->tid;
+    cr->exit_code = -1;
+    cr->has_load_failed = true;
+
+    enum intr_level il = intr_disable();
+    struct thread *parent = thread_from_tid(t->parent);
+    if (parent != NULL)
+    {
+      list_push_back(&parent->terminated_children, &cr->elem);
+    }
+    intr_set_level(il);
+
     thread_exit();
   }
 
@@ -129,8 +144,10 @@ process_wait(tid_t tid) {
   {
     // wait for process to exit
     sema_down(&t->wait_sema);
-
   }
+
+  // thread might be gone by now, fetch it again to set it to NULL in this case
+  t = thread_from_tid(tid);
 
   if (t == NULL) {
     // thread either doesn't exist or already terminated
@@ -522,8 +539,8 @@ setup_stack(void **esp, const char *arg_line) {
       char *current_stack_bottom = PHYS_BASE - 4;
 
       //calc. the start of the address space (argv)
-      void *address_space = current_stack_bottom - strlen(arg_line);
-      // word-align test it!!
+      void *address_space = current_stack_bottom - strlen(arg_line) - 1;
+      // word-align
       address_space -= ((unsigned) address_space) % 4;
       // write terminating sentinel of argv
       char **argv = address_space;

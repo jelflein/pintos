@@ -12,6 +12,7 @@
 #include "threads/vaddr.h"
 #include "devices/serial.h"
 #include "devices/shutdown.h"
+#include "debug.h"
 
 /* Halts the OS, printing the source file name, line number, and
    function name, plus a user-specific message. */
@@ -52,7 +53,7 @@ debug_panic (const char *file, int line, const char *function,
 
 /* Print call stack of a thread.
    The thread may be running, ready, or blocked. */
-static void
+void
 print_stacktrace(struct thread *t, void *aux UNUSED)
 {
   void *retaddr = NULL, **frame = NULL;
