@@ -544,6 +544,8 @@ setup_stack(void **esp, const char *arg_line) {
       address_space -= ((unsigned) address_space) % 4;
       // write terminating sentinel of argv
       char **argv = address_space;
+      // make space for address table sentinel
+      argv--;
       *argv = 0;
       argv--;
       // write addresses of the arguments here
@@ -559,8 +561,10 @@ setup_stack(void **esp, const char *arg_line) {
       address_table -= argc - 1;
 
       while ((t = strtok_r(remainder, " ", &remainder)) != NULL) {
+        //strlen without \0
         unsigned arg_size = strlen(t);
         char *string_address = current_stack_bottom - arg_size - 1;
+        //strlcpy add \0 to length
         strlcpy(string_address, t, arg_size + 1);
         current_stack_bottom -= arg_size + 1;
 

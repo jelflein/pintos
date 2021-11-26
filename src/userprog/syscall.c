@@ -228,9 +228,8 @@ void handler_halt(void) {
 
 //todo impl.
 void check_ptr(void *p) {
-  if (p >= PHYS_BASE) {
-    printf("Invalid access\n");
-    thread_exit();
+  if (p >= PHYS_BASE || get_user(p) == -1) {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 }
 
@@ -297,6 +296,14 @@ void handler_fs_create(struct intr_frame *f) {
   const char *file = (const char *) (*(stack + 1));
   off_t initial_size = (off_t) (*(stack + 2));
 
+  if(file == NULL || strlen(file) == 0)
+  {
+    f->eax = 0;
+
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+    return;
+  }
+
   //lock
   sema_down(&file_sema);
   f->eax = filesys_create(file, initial_size);
@@ -346,6 +353,13 @@ void handler_fs_open(struct intr_frame *f) {
 
   //args
   const char *file = (const char *) (*(stack + 1));
+
+  if(file == NULL || strlen(file) == 0){
+    f->eax = 0;
+
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+    return;
+  }
 
   //lock
   sema_down(&file_sema);
@@ -399,10 +413,10 @@ void handler_fs_filesize(struct intr_frame *f) {
   //lock
   sema_down(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
+
   if (fd == 0)
   {
-    //TODO rausfinden 0 oder -1?
-    f->eax = 0;
+    f->eax = -1;
     sema_up(&file_sema);
     return;
   }
