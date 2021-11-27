@@ -609,3 +609,25 @@ install_page(void *upage, void *kpage, bool writable) {
   return (pagedir_get_page(t->pagedir, upage) == NULL
           && pagedir_set_page(t->pagedir, upage, kpage, writable));
 }
+
+
+
+
+NO_RETURN void
+process_terminate(struct thread *t, int status_code, const char *cmd_line)
+{
+  printf("%s: exit(%d)\n", cmd_line, status_code);
+
+  t->exit_code = status_code;
+
+  struct thread *parent = thread_from_tid(t->parent);
+  struct child_result *cr = palloc_get_page(0);
+  cr->pid = t->tid;
+  cr->exit_code = status_code;
+  cr->has_load_failed = t->has_load_failed;
+  list_push_back(&parent->terminated_children, &cr->elem);
+
+  sema_up(&t->wait_sema);
+
+  thread_exit();
+}

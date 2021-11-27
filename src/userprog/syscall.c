@@ -22,6 +22,10 @@
 
 static void syscall_handler(struct intr_frame *);
 
+static void readu(const void *src, size_t s, void *dest);
+
+static int get_user(const uint8_t *uaddr);
+
 void handler_write(struct intr_frame *);
 
 void handler_halt(void);
@@ -52,9 +56,6 @@ void handler_fs_close(struct intr_frame *);
 
 static void handler_exit(int *stack);
 
-NO_RETURN static void
-process_terminate(struct thread *t, int status_code, const char *cmd_line);
-
 struct semaphore file_sema;
 
 void
@@ -64,10 +65,16 @@ syscall_init(void) {
 }
 
 static void
-syscall_handler(struct intr_frame *f UNUSED) {
+syscall_handler(struct intr_frame *f) {
   int *stack = f->esp;
-  switch (*stack) {
 
+  check_ptr(stack);
+
+  if (get_user((const uint8_t *) stack) == -1) {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
+
+  switch (*stack) {
     case SYS_EXIT: {
       handler_exit(stack);
       break;
@@ -133,39 +140,18 @@ static void handler_exit(int *stack) {/*
   struct thread *t = thread_current();
   const char *cmdline = &t->program_name[0];
 
-  check_ptr(stack + 1);
-  int status_code = *(stack + 1);
+  int status_code;
+  readu((const void *) (stack + 1), sizeof(status_code), &status_code);
 
   process_terminate(t, status_code, cmdline);
 
 }
 
-NO_RETURN static void
-process_terminate(struct thread *t, int status_code, const char *cmd_line)
-{
-  printf("%s: exit(%d)\n", cmd_line, status_code);
-
-  t->exit_code = status_code;
-
-  struct thread *parent = thread_from_tid(t->parent);
-  struct child_result *cr = palloc_get_page(0);
-  cr->pid = t->tid;
-  cr->exit_code = status_code;
-  cr->has_load_failed = t->has_load_failed;
-  list_push_back(&parent->terminated_children, &cr->elem);
-
-  sema_up(&t->wait_sema);
-
-  thread_exit();
-}
-
-
 void handler_wait(struct intr_frame *f) {
   int *stack = f->esp;
 
-  check_ptr(stack + 1);
-
-  int pid = *(stack + 1);
+  int pid;
+  readu((const void *) (stack + 1), sizeof(pid), &pid);
 
   f->eax = process_wait(pid);
 }
@@ -186,7 +172,6 @@ get_user(const uint8_t *uaddr) {
   return result;
 }
 
-
 /* Writes BYTE to user address UDST.
    UDST must be below PHYS_BASE.
    Returns true if successful, false if a segfault occurred. */
@@ -196,6 +181,73 @@ put_user(uint8_t *udst, uint8_t byte) {
   asm ("movl $1f, %0; movb %b2, %1; 1:"
   : "=&a" (error_code), "=m" (*udst) : "q" (byte));
   return error_code != -1;
+}
+
+/**
+ * read a piece of memory from userspace
+ * @param src user src
+ * @param s length
+ * @param dest kernel src
+ */
+static void readu(const void *src, const size_t s, void *dest)
+{
+  for (unsigned i = 0; i < s; i++)
+  {
+    const uint8_t *curent_ptr = ((const uint8_t *) src) + i;
+    //check if kernel
+    check_ptr((void *)curent_ptr);
+    int r = get_user(curent_ptr);
+    //check if seg_fault
+    if (r == -1)
+      process_terminate(thread_current(), -1, thread_current()
+      ->program_name);
+
+    ((uint8_t *)dest)[i] = (uint8_t)r;
+  }
+}
+
+
+/**
+ * write a piece of memory to user space safely
+ * @param src 
+ * @param s 
+ * @param dest 
+ */
+static void writeu(const void *src, const size_t s, void *dest)
+{
+  for (unsigned i = 0; i < s; i++)
+  {
+    void *current_ptr = dest + i;
+    check_ptr(current_ptr);
+
+    int res = put_user(current_ptr, ((uint8_t *)src)[i]);
+    if (res == -1)
+      process_terminate(thread_current(), -1, thread_current()
+              ->program_name);
+  }
+}
+
+/**
+ * compute length of string in user space
+ * @param string user src
+ */
+static size_t strlenu(const char *string)
+{
+  const char *p = string;
+
+  ASSERT (string != NULL);
+
+  int current_byte;
+  do {
+    current_byte = get_user((const uint8_t *) p);
+    if (current_byte == -1) {
+      process_terminate(thread_current(), -1, thread_current()
+              ->program_name);
+    }
+  }
+  while ((char)current_byte != '\0' && p++);
+
+  return p - string;
 }
 
 
@@ -226,9 +278,8 @@ void handler_halt(void) {
   shutdown_power_off();
 }
 
-//todo impl.
 void check_ptr(void *p) {
-  if (p >= PHYS_BASE || get_user(p) == -1) {
+  if (p >= PHYS_BASE) {
     process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 }
@@ -241,13 +292,29 @@ static void syscall_ret_value(int ret, struct intr_frame *f) {
 //TODO deny_to_write
 void handler_exec(struct intr_frame *f) {
   int *stack = f->esp;
-  char *cmd_line = (char *) (*(stack + 1));
 
-  check_ptr(cmd_line);
+  const char *cmd_line_ptr;
+  readu(stack + 1, sizeof cmd_line_ptr, &cmd_line_ptr);
 
+  if (cmd_line_ptr == NULL)
+  {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
+
+  size_t cmd_length = strlenu((const char *)cmd_line_ptr);
+  if (cmd_length == 0)
+  {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
+
+  char cmd_line[cmd_length+1];
+  readu(cmd_line_ptr, sizeof cmd_line, cmd_line);
+
+  sema_down(&file_sema);
   tid_t pid = process_execute(cmd_line);
 
   if (pid == -1) {
+    sema_up(&file_sema);
     syscall_ret_value(-1, f);
     return;
   }
@@ -255,6 +322,7 @@ void handler_exec(struct intr_frame *f) {
   struct thread *t = thread_from_tid(pid);
   //sema sleep until loaded
   sema_down(&t->process_load_sema);
+  sema_up(&file_sema);
   //check if thread failed
   // the thread might be gone by now
   enum intr_level il = intr_get_level();
@@ -288,21 +356,27 @@ void handler_exec(struct intr_frame *f) {
 void handler_fs_create(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
-  check_ptr(stack + 2);
+  const char *file_name_pointer;
+  readu(stack + 1, sizeof file_name_pointer, &file_name_pointer);
 
-  //args
-  const char *file = (const char *) (*(stack + 1));
-  off_t initial_size = (off_t) (*(stack + 2));
+  if (file_name_pointer == NULL)
+  {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
 
-  if(file == NULL || strlen(file) == 0)
+  size_t file_name_size = strlenu((const char *) file_name_pointer);
+  if(file_name_size == 0)
   {
     f->eax = 0;
-
-    process_terminate(thread_current(), -1, thread_current()->program_name);
     return;
   }
+  //args
+  char file[file_name_size+1];
+  off_t initial_size;
+
+  readu(file_name_pointer, sizeof file, file);
+  readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
+
 
   //lock
   sema_down(&file_sema);
@@ -313,11 +387,24 @@ void handler_fs_create(struct intr_frame *f) {
 void handler_fs_remove(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
+  const char *file_name_pointer;
+  readu(stack + 1, sizeof file_name_pointer, &file_name_pointer);
 
+  if (file_name_pointer == NULL)
+  {
+    f->eax = 0;
+    return;
+  }
+
+  size_t file_name_size = strlenu((const char *) file_name_pointer);
+  if(file_name_size == 0)
+  {
+    f->eax = 0;
+    return;
+  }
   //args
-  const char *file = (const char *) (*(stack + 1));
+  char file[file_name_size+1];
+  readu(file_name_pointer, sizeof file, file);
 
   //lock
   sema_down(&file_sema);
@@ -348,18 +435,27 @@ find_file_descriptor(int fd, struct thread *thread) {
 void handler_fs_open(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
+  const char *file_name_pointer;
+  readu(stack + 1, sizeof file_name_pointer, &file_name_pointer);
 
-  //args
-  const char *file = (const char *) (*(stack + 1));
-
-  if(file == NULL || strlen(file) == 0){
-    f->eax = 0;
-
+  if (file_name_pointer == NULL)
+  {
     process_terminate(thread_current(), -1, thread_current()->program_name);
     return;
   }
+
+  size_t file_name_size = strlenu((const char *) file_name_pointer);
+  if (file_name_size == 0)
+  {
+    f->eax = -1;
+    return;
+  }
+  //args
+  char file[file_name_size+1];
+  off_t initial_size;
+
+  readu(file_name_pointer, sizeof file, file);
+  readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
 
   //lock
   sema_down(&file_sema);
@@ -399,14 +495,15 @@ void handler_fs_open(struct intr_frame *f) {
   f->eax = fd->descriptor_id;
 }
 
+static uint8_t kbuffer[8192];
+
 void handler_fs_filesize(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
-
   //args
   int fd_id = (int) (*(stack + 1));
+
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
   struct thread *t = thread_current();
 
@@ -428,17 +525,14 @@ void handler_fs_filesize(struct intr_frame *f) {
 void handler_fs_read(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
-  check_ptr(stack + 2);
-  check_ptr(stack + 3);
-
   //args
-  int fd_id = (int) (*(stack + 1));
-  unsigned char *buffer = (void *) (*(stack + 2));
-  unsigned int size = (unsigned int) (*(stack + 3));
+  int fd_id;
+  unsigned char *buffer;
+  unsigned int size;
 
-  check_ptr((void *)buffer + size - 1);
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+  readu((const void *) (stack + 2), sizeof(buffer), &buffer);
+  readu((const void *) (stack + 3), sizeof(size), &size);
 
   if (fd_id == 0) { // stdin
     unsigned actual_size = MIN(size, 32u);
@@ -474,7 +568,12 @@ void handler_fs_read(struct intr_frame *f) {
     return;
   }
 
-  off_t bytes_read = file_read(fd->f, buffer, (off_t)size);
+  size_t actual_size = MIN(sizeof kbuffer, size);
+
+  off_t bytes_read = file_read(fd->f, kbuffer, (off_t)actual_size);
+
+  writeu(kbuffer, size, buffer);
+
   f->eax = bytes_read;
 
   //unlock
@@ -487,20 +586,17 @@ void handler_fs_read(struct intr_frame *f) {
 void handler_fs_write(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
-  check_ptr(stack + 2);
-  check_ptr(stack + 3);
-
   //args
-  int fd_id = (int) (*(stack + 1));
-  const char *buffer = (void *) (*(stack + 2));
-  unsigned int size = (unsigned int) (*(stack + 3));
+  int fd_id;
+  const char *buffer;
+  unsigned int size;
 
-  check_ptr((void *) buffer + size - 1);
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+  readu((const void *) (stack + 2), sizeof(buffer), &buffer);
+  readu((const void *) (stack + 3), sizeof(size), &size);
 
   if (fd_id == 1) {
-    unsigned actual_size = MIN(size, 2048u);
+    unsigned actual_size = MIN(size, 4096u);
     putbuf(buffer, actual_size);
     f->eax = actual_size;
     //return size...
@@ -516,6 +612,10 @@ void handler_fs_write(struct intr_frame *f) {
     return;
   }
 
+  size_t actual_size = MIN(sizeof kbuffer, size);
+
+  readu(buffer, actual_size, kbuffer);
+
   struct thread *cur = thread_current();
 
   //lock
@@ -528,8 +628,8 @@ void handler_fs_write(struct intr_frame *f) {
     return;
   }
 
-  off_t bytes_written = file_write(fd->f, buffer, (off_t)size);
-  f ->eax = bytes_written;
+  off_t bytes_written = file_write(fd->f, kbuffer, (off_t)actual_size);
+  f->eax = bytes_written;
 
   //unlock
   sema_up(&file_sema);
@@ -546,13 +646,12 @@ These semantics are implemented in the file system and do not require any specia
 void handler_fs_seek(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
-  check_ptr(stack + 2);
-
   //args
-  int fd_id = (int) (*(stack + 1));
-  unsigned int position = (unsigned int) (*(stack + 2));
+  int fd_id;
+  unsigned int position;
+
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+  readu((const void *) (stack + 2), sizeof(position), &position);
 
   //lock
   sema_down(&file_sema);
@@ -577,11 +676,10 @@ void handler_fs_seek(struct intr_frame *f) {
 void handler_fs_tell(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
-
   //args
-  int fd_id = (int) (*(stack + 1));
+  int fd_id;
+
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
   sema_down(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
@@ -598,11 +696,9 @@ void handler_fs_tell(struct intr_frame *f) {
 void handler_fs_close(struct intr_frame *f) {
   int *stack = f->esp;
 
-  //check args
-  check_ptr(stack + 1);
-
   //args
-  int fd_id = (int) (*(stack + 1));
+  int fd_id;
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
   struct thread *t = thread_current();
 

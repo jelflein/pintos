@@ -12,7 +12,6 @@
 
 char buf1[BUF_SIZE];
 char buf2[BUF_SIZE];
-
 void
 test_main (void) 
 {

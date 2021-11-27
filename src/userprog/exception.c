@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "lib/kernel/debug.h"
+#include "process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -128,7 +129,7 @@ page_fault (struct intr_frame *f)
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
 
-  print_stacktrace(thread_current(), NULL);
+  //print_stacktrace(thread_current(), NULL);
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -158,6 +159,10 @@ page_fault (struct intr_frame *f)
     f->eip = (void (*)(void))f->eax;
     f->eax = 0xFFFFFFFF;
     return;
+  }
+  else {
+    // user program caused page fault
+    process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 
   /* To implement virtual memory, delete the rest of the function
