@@ -390,7 +390,15 @@ load(const char *file_name, void (**eip)(void), void **esp, const char
 
   done:
   /* We arrive here whether the load is successful or not. */
-  file_close(file);
+  if (success) {
+    // if loaded successfully, save file pointer and protect
+    // will close at process exit
+    thread_current()->exec_file = file;
+    file_deny_write(file);
+  } else {
+    file_close(file);
+  }
+
   return success;
 }
 
@@ -619,6 +627,9 @@ process_terminate(struct thread *t, int status_code, const char *cmd_line)
   printf("%s: exit(%d)\n", cmd_line, status_code);
 
   t->exit_code = status_code;
+
+  if (t->exec_file != NULL)
+    file_close(t->exec_file);
 
   struct thread *parent = thread_from_tid(t->parent);
   struct child_result *cr = palloc_get_page(0);

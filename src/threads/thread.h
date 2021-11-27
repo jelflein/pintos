@@ -120,6 +120,7 @@ struct thread
     struct list terminated_children;
     int exit_code;
     tid_t parent;
+    struct file *exec_file;
 #endif
 
     /* Owned by thread.c. */

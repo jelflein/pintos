@@ -117,6 +117,7 @@ static bool is_thread(struct thread *)UNUSED;
 
     initial_thread->has_load_failed = false;
     initial_thread->parent = 0;
+    initial_thread->exec_file = NULL;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -222,6 +223,8 @@ thread_create(const char *name, int priority, thread_func *function, void *aux) 
     list_init(&t->file_descriptors);
     list_init(&t->terminated_children);
     t->parent = thread_current()->tid;
+    t->exec_file = NULL;
+
 
   /* Stack frame for kernel_thread(). */
     kf = alloc_frame(t, sizeof *kf);
