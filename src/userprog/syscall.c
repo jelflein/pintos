@@ -144,7 +144,6 @@ static void handler_exit(int *stack) {/*
   readu((const void *) (stack + 1), sizeof(status_code), &status_code);
 
   process_terminate(t, status_code, cmdline);
-
 }
 
 void handler_wait(struct intr_frame *f) {
@@ -568,13 +567,23 @@ void handler_fs_read(struct intr_frame *f) {
     return;
   }
 
-  size_t actual_size = MIN(sizeof kbuffer, size);
+  size_t read_so_far = 0;
+  for (;read_so_far < size;)
+  {
+    off_t chunk_size = MIN(sizeof kbuffer, size - read_so_far);
+    chunk_size = file_read(fd->f, kbuffer, (off_t)chunk_size);
 
-  off_t bytes_read = file_read(fd->f, kbuffer, (off_t)actual_size);
+    if (chunk_size == 0)
+    {
+      break;
+    }
 
-  writeu(kbuffer, size, buffer);
+    writeu(kbuffer + read_so_far, chunk_size, buffer);
 
-  f->eax = bytes_read;
+    read_so_far += chunk_size;
+  }
+
+  f->eax = read_so_far;
 
   //unlock
   sema_up(&file_sema);
@@ -612,10 +621,6 @@ void handler_fs_write(struct intr_frame *f) {
     return;
   }
 
-  size_t actual_size = MIN(sizeof kbuffer, size);
-
-  readu(buffer, actual_size, kbuffer);
-
   struct thread *cur = thread_current();
 
   //lock
@@ -628,8 +633,22 @@ void handler_fs_write(struct intr_frame *f) {
     return;
   }
 
-  off_t bytes_written = file_write(fd->f, kbuffer, (off_t)actual_size);
-  f->eax = bytes_written;
+  size_t written_so_far = 0;
+  for (;written_so_far < size;)
+  {
+    size_t chunk_size = MIN(sizeof kbuffer, size - written_so_far);
+    readu(buffer + written_so_far, chunk_size, kbuffer);
+
+    chunk_size = file_write(fd->f, kbuffer, (off_t)chunk_size);
+    if (chunk_size == 0)
+    {
+      break;
+    }
+
+    written_so_far += chunk_size;
+  }
+
+  f->eax = written_so_far;
 
   //unlock
   sema_up(&file_sema);
