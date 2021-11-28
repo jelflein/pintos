@@ -109,6 +109,11 @@ start_process(void *cmdline_ptr) {
     {
       list_push_back(&parent->terminated_children, &cr->elem);
     }
+    else
+    {
+      palloc_free_page(cr);
+    }
+
     intr_set_level(il);
 
     thread_exit();
