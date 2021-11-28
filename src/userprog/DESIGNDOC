@@ -273,42 +273,48 @@ external interrupts.
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
-To find out whether a child process still exists (is still running /
-waiting), we disable interrupts for this critical section to avoid
+To find out whether a child process or parent process still exists (is still
+running /
+waiting), we disable interrupts for this short critical section to avoid
 race conditions.
 
-When the thread still exists, we wait for it to finish using a
-semaphore. The function process_exit, called from puts metadata like exit code
-into a list of the parent process. After the waiting is done, the
-child process is terminated and we just fetch the exit code from
-the list of the parent.
+When the child thread still exists, we wait for it to finish using a
+semaphore. The function process_exit, called from the exit syscall handler
+and error handling code, metadata like exit code of this process are put
+into a list of the parent process (only if parent still exists).
+
+After the waiting of the parent on its child is done, the
+child process is no longer running and we just fetch the exit code from
+the list of child process metadata from the parent.
 
 The resources like file descriptors, terminated child process metadata
- and memory are freed in
-process_exit. This is called from the exit syscall handler and,
+and memory are freed in process_exit. This is called from the exit syscall
+handler and,
 through a few function calls, in places where a process is terminated
 for invalid pointers etc. That way no resources are leaked.
-
 
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
-We need to read user data for the sys. calls. otherwise it is very
-hard to interact with a user program. The address of the pointer must
-be in the user address space, this will be checked. We copy the data
-from the user address space to the kernel space. We use the get_user/put_user
-to avoid sig_faults.
+We need to read user data for the sys. calls. The address of the pointer must
+be in the user address space ( < PHYS_BASE), this will be checked in our
+function readu. We copy the data
+from the user space to the kernel space. We use the get_user/put_user
+to avoid sig_faults and gracefully terminate the user process.
+To make get_user and put_user work, we put the appropriate handling
+code into the page fault handler.
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
-You control the files only in the process. In the current impl.
+We keep a list of file descriptors for every process. In the current impl.
 two process can write to the same file, if a kernel task will
-interrupt and write to the same file. Their is also a limit
-for the max. amount of file descriptors. It is also
-very bad for the memory, because we allocate 4kb for
+interrupt and write to the same file.
+We allocate a piece of memory for every file descriptor. The pintos
+kernel allocator
+It is also very bad for the memory, because we allocate 4kb for
 every fd.
 
 An advantage is that you do not need any "global" sync. This is
@@ -320,12 +326,9 @@ the correct fd very fast (except you open a lot of).
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
 
-We can distinguish between a thread and a process. We have also
-a "unique" id for special task (vm, filesystem). As an example we could
-close all files for a process instead for a thread etc. We could have also
-a list with process and a table with threads of this process
-
-PID -> threads (with tid)
+We did not change it. The reason is simplicity.
+The disadvantage is that this mapping cannot allow multiple threads
+per process.
 
 			   SURVEY QUESTIONS
 			   ================
