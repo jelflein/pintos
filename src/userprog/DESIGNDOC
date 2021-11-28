@@ -29,19 +29,74 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+We changed the method sig. -> setup_stack(void **esp, const char *arg_line).
+For the argument parsing we do not use any data struct. Some result of this
+we save
+in the thread struct.
+
+We saved the full command line in the thread struct (this will use for the exit
+call etc.).
+
+struct thread {
+    …
+    This is the full commandline.
+    char program_name[32];
+    …
+}
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe how you implemented argument parsing.  How do
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
 
+1. We calculate the begin of the "address space" with the size of the
+command line.
+2. We align the stack
+3. terminating sentinel
+4. We use the strtok_r for parsing the tokens of the command line.
+--> We put simul. the value and the address on the stack.
+---> The order is correct because we use strtok_r in a loop and
+put the addresses of the value to the correct postion, because we know the
+begin of the "adress space". We decrease the amount of args
+(adress space - argc) and then we have
+the begin of the first arg (we increase this also in the loop).
+5. argv pointer below the last address.
+6. size blow argv pointer
+7. argc and "return address" of the stack
+
+>> How do you avoid overflowing the stack page?
+We use a overflow function to detect it. It use the size of the data frame,
+arc for the amount of pointers and 16bytes for return address, null sentinel etc.
+It is not 100% correct, but it is very simple and fast.
+It will not detect double space etc.
+
+
 ---- RATIONALE ----
 
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
 
+strtok_r provides the same functionality as strtok,
+just with a bit more work required on the caller side.
+Strtok is problematic because it internally keeps track of the state between
+repeated function invocations. When
+multiple call sites call the function in a loop simultaneously, this would
+cause a problem. Consider the case when
+function A calls strtok in a loop and also calls functon B every time in
+this loop, which itself calls strtok.
+Strtok has no internal stack to keep separate states in this
+scenario. When each caller passes a state variable,
+as strtok_r requires, this problem is avoided.
+
 >> A4: In Pintos, the kernel separates commands into a executable name
 >> and arguments.  In Unix-like systems, the shell does this
 >> separation.  Identify at least two advantages of the Unix approach.
+
+1) The shell can change its algorithm parsing the program name
+and arguments depending on the preference of the user.
+
+2) Less logic in the kernel reduces the potential attack surface
+for security problems of the privileged kernel.
 
 			     SYSTEM CALLS
 			     ============
@@ -52,14 +107,71 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+changed structs
+struct thread {
+  ..
+  char program_name[32];
+  keeps the program name for each user program, used for exit message and more.
+
+  struct semaphore process_load_sema;
+  synchronization primitive to wait for process load, executable loading
+
+  struct semaphore wait_sema;
+  synchronization primitive to wait for process termination
+
+  bool has_load_failed;
+  used to indicate failed process loading
+
+  struct list file_descriptors;
+  list of file descriptors which this process possesses
+
+  struct list terminated_children;
+  list of metadata for terminated child processes of this process
+
+  int exit_code;
+  exit code of this process
+
+  tid_t parent;
+  reference to parent process
+
+  struct file *exec_file;
+  open file for process executable. Used to hold write lock.
+  ..
+}
+
+
+new structs
+struct child_result { metadata about exited child process.
+    tid_t pid;
+    int exit_code;
+    struct list_elem elem;
+    bool has_load_failed;
+};
+
+struct file_descriptor { maps file descriptor id to file pointer.
+  int descriptor_id;
+  struct file *f;
+  struct list_elem list_elem;
+};
+
+
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
+
+Each process has their own descriptor table, which maps file descriptors to file pointers.
+File descriptors are unique within a process, not within the whole OS.
+
 
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
+We use the proposed put_user and get_user functions and logic in the page fault handler.
+We added new functions readu and writeu to read and write larger chunks of memory from userland.
+A page fault causes get_user to return -1, which causes readu to terminate the
+user process with exit code -1
+
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -68,8 +180,19 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+Firstly we do the appropriate safety checks. Is the process actually a
+ child of the current process etc.
+Wait works by waiting on the semaphore wait_sema of the specific process
+ to be waited on.
+The exit system call handler puts a struct child_result in the parents
+ list which contains exit code and pid of the
+exited child process. When execution returns to the wait syscall handler,
+ it looks up this struct in the parents list
+and returns the exit code.
+
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -84,6 +207,41 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 >> allocated resources (locks, buffers, etc.) are freed?  In a few
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
+We use our functions readu and writeu to access user memory. Those
+ functions terminate the child process in the case of a page fault.
+ The normal process termination functions are called which will
+ clean up all opened files  and memory of the process.
+
+ In handler_fs_open, we carefully ordered our code so that all
+ necessary reads from userland are done before allocating memory
+ for the file handle struct. This way, the struct cannot be leaked
+ by an early function exit on a page fault.
+
+ For temporary locks like the filesystem lock, it gets more tricky.
+ In the handler for SYS_WRITE, we lock the filesystem and
+ in a loop do file_read() followed by a write to the userland.
+ To unlock the file system lock even when a page fault occurs,
+ we introduced a special function try_writeu. It doesn't immediately
+ terminate the user process but instead returns false, which gives the
+ syscall handler the chance to unlock the lock before terminating
+ the user process.
+
+ if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer))
+ {
+   sema_up(&file_sema);
+   process_terminate(thread_current(), -1, thread_current()
+           ->program_name);
+ }
+
+ We try to keep the use of the try_ functions to a minimum as
+ it results in many if-branches that make the code harder to read.
+
+ In general, systems programmers often use the goto statement
+ to emulate try-catch style semantics from higher level languages.
+ We see the benefits but also worry about the error-prone nature
+ of it, see the famous "goto fail" bug from Apple a few years ago.
+
+
 
 ---- SYNCHRONIZATION ----
 
@@ -92,6 +250,22 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
 
+We use a semaphore to wait. The sys. call exec invokes
+the process_execute function, after this it will check the pid. If the pid
+is not -1, then it will wait until the process is finish with loading
+(using the loading semaphore). The semaphore will be unlocked after the
+load() function. The thread struct. has an attribute "has_load_failed"
+(set after the load function), if this attribute true, then the syscall
+ returns -1.
+
+Some notes:
+The exec. sys. call disable the interrupts to search the pid in the
+thread list (it is a very short amount of time). This is not the best impl.
+You can avoid this, if you extend the thread struct. with variables. This
+source of this design "fault" is, that we assume the same behaviour
+as in timer.c (interrupts disabled), but this behaviour is only for
+external interrupts.
+
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
 >> calls wait(C) before C exits?  After C exits?  How do you ensure
@@ -99,16 +273,59 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+To find out whether a child process still exists (is still running /
+waiting), we disable interrupts for this critical section to avoid
+race conditions.
+
+When the thread still exists, we wait for it to finish using a
+semaphore. The function process_exit, called from puts metadata like exit code
+into a list of the parent process. After the waiting is done, the
+child process is terminated and we just fetch the exit code from
+the list of the parent.
+
+The resources like file descriptors, terminated child process metadata
+ and memory are freed in
+process_exit. This is called from the exit syscall handler and,
+through a few function calls, in places where a process is terminated
+for invalid pointers etc. That way no resources are leaked.
+
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
+We need to read user data for the sys. calls. otherwise it is very
+hard to interact with a user program. The address of the pointer must
+be in the user address space, this will be checked. We copy the data
+from the user address space to the kernel space. We use the get_user/put_user
+to avoid sig_faults.
+
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
+You control the files only in the process. In the current impl.
+two process can write to the same file, if a kernel task will
+interrupt and write to the same file. Their is also a limit
+for the max. amount of file descriptors. It is also
+very bad for the memory, because we allocate 4kb for
+every fd.
+
+An advantage is that you do not need any "global" sync. This is
+very good for the speed. If the process terminated, you can
+easy close every file, because the every thread/process as
+a list with the fds. If you write to a file, you will find
+the correct fd very fast (except you open a lot of).
+
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+
+We can distinguish between a thread and a process. We have also
+a "unique" id for special task (vm, filesystem). As an example we could
+close all files for a process instead for a thread etc. We could have also
+a list with process and a table with threads of this process
+
+PID -> threads (with tid)
 
 			   SURVEY QUESTIONS
 			   ================

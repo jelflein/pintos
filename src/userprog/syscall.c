@@ -128,8 +128,8 @@ syscall_handler(struct intr_frame *f) {
       break;
     }
     default:
-      printf("system call!\n");
-      thread_exit();
+      printf("invalid system call!\n");
+      process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 }
 
@@ -182,6 +182,24 @@ put_user(uint8_t *udst, uint8_t byte) {
   return error_code != -1;
 }
 
+static bool try_readu(const void *src, const size_t s, void *dest)
+{
+  for (unsigned i = 0; i < s; i++)
+  {
+    const uint8_t *curent_ptr = ((const uint8_t *) src) + i;
+    //check if kernel
+    check_ptr((void *)curent_ptr);
+    int r = get_user(curent_ptr);
+    //check if page fault
+    if (r == -1)
+      return false;
+
+    ((uint8_t *)dest)[i] = (uint8_t)r;
+  }
+
+  return true;
+}
+
 /**
  * read a piece of memory from userspace
  * @param src user src
@@ -190,19 +208,26 @@ put_user(uint8_t *udst, uint8_t byte) {
  */
 static void readu(const void *src, const size_t s, void *dest)
 {
+  if (!try_readu(src, s, dest))
+  {
+    process_terminate(thread_current(), -1, thread_current()
+                  ->program_name);
+  }
+}
+
+
+static bool try_writeu(const void *src, const size_t s, void *dest)
+{
   for (unsigned i = 0; i < s; i++)
   {
-    const uint8_t *curent_ptr = ((const uint8_t *) src) + i;
-    //check if kernel
-    check_ptr((void *)curent_ptr);
-    int r = get_user(curent_ptr);
-    //check if seg_fault
-    if (r == -1)
-      process_terminate(thread_current(), -1, thread_current()
-      ->program_name);
+    void *current_ptr = dest + i;
+    check_ptr(current_ptr);
 
-    ((uint8_t *)dest)[i] = (uint8_t)r;
+    int res = put_user(current_ptr, ((uint8_t *)src)[i]);
+    if (res == -1)
+      return false;
   }
+  return true;
 }
 
 
@@ -214,14 +239,9 @@ static void readu(const void *src, const size_t s, void *dest)
  */
 static void writeu(const void *src, const size_t s, void *dest)
 {
-  for (unsigned i = 0; i < s; i++)
+  if (!try_writeu(src, s, dest))
   {
-    void *current_ptr = dest + i;
-    check_ptr(current_ptr);
-
-    int res = put_user(current_ptr, ((uint8_t *)src)[i]);
-    if (res == -1)
-      process_terminate(thread_current(), -1, thread_current()
+    process_terminate(thread_current(), -1, thread_current()
               ->program_name);
   }
 }
@@ -249,30 +269,6 @@ static size_t strlenu(const char *string)
   return p - string;
 }
 
-
-void handler_write(struct intr_frame *f) {
-  int *stack = f->esp;
-  char *buffer = *(char **) (stack + 2);
-  unsigned size = *(stack + 3);
-  int fd = *(stack + 1);
-  if (fd != 1) {
-    printf("system call!\n");
-    thread_exit();
-  }
-  if (buffer >= (char *) PHYS_BASE) {
-    thread_exit();
-  }
-  //writing to STDOUT
-  int a = (int) size;
-  while (a >= 64) {
-    putbuf(buffer, 64);
-    buffer = buffer + 64;
-    a -= 64;
-  }
-  putbuf(buffer, a);
-  f->eax = (int) size;
-}
-
 void handler_halt(void) {
   shutdown_power_off();
 }
@@ -287,8 +283,6 @@ static void syscall_ret_value(int ret, struct intr_frame *f) {
   f->eax = ret;
 }
 
-//TODO file lock
-//TODO deny_to_write
 void handler_exec(struct intr_frame *f) {
   int *stack = f->esp;
 
@@ -375,7 +369,6 @@ void handler_fs_create(struct intr_frame *f) {
 
   readu(file_name_pointer, sizeof file, file);
   readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
-
 
   //lock
   sema_down(&file_sema);
@@ -546,15 +539,6 @@ void handler_fs_read(struct intr_frame *f) {
     return;
   }
 
-  // TODO: Implement executable file protection
-  bool is_exec = false;
-
-  if (is_exec)
-  {
-    f->eax = -1;
-    return;
-  }
-
   struct thread *cur = thread_current();
 
   //lock
@@ -578,7 +562,12 @@ void handler_fs_read(struct intr_frame *f) {
       break;
     }
 
-    writeu(kbuffer + read_so_far, chunk_size, buffer);
+    if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer))
+    {
+      sema_up(&file_sema);
+      process_terminate(thread_current(), -1, thread_current()
+              ->program_name);
+    }
 
     read_so_far += chunk_size;
   }
@@ -589,9 +578,6 @@ void handler_fs_read(struct intr_frame *f) {
   sema_up(&file_sema);
 }
 
-//Denying writes to exec.
-//Det. if exec
-//TODO check length of file name (kernel)
 void handler_fs_write(struct intr_frame *f) {
   int *stack = f->esp;
 
@@ -612,15 +598,6 @@ void handler_fs_write(struct intr_frame *f) {
     return;
   }
 
-  // TODO: Implement executable file protection
-  bool is_exec = false;
-
-  if (is_exec)
-  {
-    f->eax = -1;
-    return;
-  }
-
   struct thread *cur = thread_current();
 
   //lock
@@ -637,9 +614,16 @@ void handler_fs_write(struct intr_frame *f) {
   for (;written_so_far < size;)
   {
     size_t chunk_size = MIN(sizeof kbuffer, size - written_so_far);
-    readu(buffer + written_so_far, chunk_size, kbuffer);
+
+    if (!try_readu(buffer + written_so_far, chunk_size, kbuffer))
+    {
+      sema_up(&file_sema);
+      process_terminate(thread_current(), -1, thread_current()
+              ->program_name);
+    }
 
     chunk_size = file_write(fd->f, kbuffer, (off_t)chunk_size);
+
     if (chunk_size == 0)
     {
       break;

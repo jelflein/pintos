@@ -116,7 +116,8 @@ start_process(void *cmdline_ptr) {
 
     intr_set_level(il);
 
-    thread_exit();
+    //thread_exit();
+    process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 
 
@@ -141,7 +142,7 @@ start_process(void *cmdline_ptr) {
    does nothing. */
 int
 process_wait(tid_t tid) {
-  //pid is still alive
+
   struct thread *t = thread_from_tid(tid);
   struct thread *current = thread_current();
 
@@ -151,7 +152,7 @@ process_wait(tid_t tid) {
     sema_down(&t->wait_sema);
   }
 
-  // thread might be gone by now, fetch it again to set it to NULL in this case
+  // thread should be gone by now, fetch it again to set it to NULL in this case
   t = thread_from_tid(tid);
 
   if (t == NULL) {
@@ -181,9 +182,16 @@ process_exit(void) {
   while (!list_empty(&cur->file_descriptors)) {
     struct list_elem *e = list_pop_front(&cur->file_descriptors);
     struct file_descriptor *entry = list_entry(e, struct file_descriptor,
-                                               list_elem);
+            list_elem);
 
     file_close(entry->f);
+    palloc_free_page(entry);
+  }
+
+  //free all child metadata entries
+  while (!list_empty(&cur->terminated_children)) {
+    struct list_elem *e = list_pop_front(&cur->terminated_children);
+    struct child_result *entry = list_entry(e, struct child_result, elem);
     palloc_free_page(entry);
   }
 
@@ -536,6 +544,27 @@ static unsigned countParams(const char *str) {
   return ret;
 }
 
+/**
+ * We know that this method is not 100% exact, but for 99% of the use-cases
+ * it will work.
+ * @param argc
+ * @param size_of_cmd_line
+ * @return
+ */
+static bool
+overflow(unsigned int argc, unsigned int size_of_cmd_line, unsigned int align) {
+  //return address (4), argc (4), argv ptr (4), null sentinel (4)
+  //in bits
+  unsigned int size = 16;
+  size += align;
+  // argv address table entries
+  size += argc * 4;
+  //not optimal for double spaces
+  size += size_of_cmd_line + 1;
+
+  return size > 4096;
+}
+
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
@@ -551,10 +580,21 @@ setup_stack(void **esp, const char *arg_line) {
       //daten drauf
       char *current_stack_bottom = PHYS_BASE - 4;
 
+      char *t;
+      char *remainder = (char *) arg_line;
+
+      //char *c;
+      unsigned argc = countParams(arg_line);
+      remainder = (char *) arg_line;
+
+      if (overflow(argc, 0, 0)) return false;
+
+      unsigned int arg_line_size = strlen(arg_line);
       //calc. the start of the address space (argv)
-      void *address_space = current_stack_bottom - strlen(arg_line) - 1;
+      void *address_space = current_stack_bottom - arg_line_size - 1;
       // word-align
-      address_space -= ((unsigned) address_space) % 4;
+      unsigned int align = ((unsigned) address_space) % 4;
+      address_space -= align;
       // write terminating sentinel of argv
       char **argv = address_space;
       // make space for address table sentinel
@@ -563,19 +603,17 @@ setup_stack(void **esp, const char *arg_line) {
       argv--;
       // write addresses of the arguments here
 
-      char *t;
-      char *remainder = (char *) arg_line;
-
-      //char *c;
-      unsigned argc = countParams(arg_line);
-      remainder = (char *) arg_line;
-
       char **address_table = argv;
       address_table -= argc - 1;
 
+      unsigned int current_data_size = 0;
       while ((t = strtok_r(remainder, " ", &remainder)) != NULL) {
         //strlen without \0
         unsigned arg_size = strlen(t);
+
+        current_data_size += arg_size + 1;
+        if (overflow(argc, current_data_size, align)) return false;
+
         char *string_address = current_stack_bottom - arg_size - 1;
         //strlcpy add \0 to length
         strlcpy(string_address, t, arg_size + 1);
@@ -636,12 +674,19 @@ process_terminate(struct thread *t, int status_code, const char *cmd_line)
   if (t->exec_file != NULL)
     file_close(t->exec_file);
 
-  struct thread *parent = thread_from_tid(t->parent);
   struct child_result *cr = palloc_get_page(0);
-  cr->pid = t->tid;
-  cr->exit_code = status_code;
-  cr->has_load_failed = t->has_load_failed;
-  list_push_back(&parent->terminated_children, &cr->elem);
+  enum intr_level il = intr_disable();
+  struct thread *parent = thread_from_tid(t->parent);
+  if (parent != NULL) {
+    cr->pid = t->tid;
+    cr->exit_code = status_code;
+    cr->has_load_failed = t->has_load_failed;
+    list_push_back(&parent->terminated_children, &cr->elem);
+  }
+  else {
+    palloc_free_page(cr);
+  }
+  intr_set_level(il);
 
   sema_up(&t->wait_sema);
 
