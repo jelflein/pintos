@@ -16,6 +16,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
@@ -98,7 +99,7 @@ start_process(void *cmdline_ptr) {
   if (!success) {
     struct thread *t = thread_current();
 
-    struct child_result *cr = palloc_get_page(0);
+    struct child_result *cr = malloc(sizeof (struct child_result));
     cr->pid = t->tid;
     cr->exit_code = -1;
     cr->has_load_failed = true;
@@ -111,7 +112,7 @@ start_process(void *cmdline_ptr) {
     }
     else
     {
-      palloc_free_page(cr);
+      free(cr);
     }
 
     intr_set_level(il);
@@ -164,7 +165,7 @@ process_wait(tid_t tid) {
     {
       list_remove(&terminated_child->elem);
       int ec = terminated_child->exit_code;
-      palloc_free_page(terminated_child);
+      free(terminated_child);
       return ec;
     }
   }
@@ -192,7 +193,7 @@ process_exit(void) {
   while (!list_empty(&cur->terminated_children)) {
     struct list_elem *e = list_pop_front(&cur->terminated_children);
     struct child_result *entry = list_entry(e, struct child_result, elem);
-    palloc_free_page(entry);
+    free(entry);
   }
 
   //add thread pid as terminated to parent
@@ -674,7 +675,8 @@ process_terminate(struct thread *t, int status_code, const char *cmd_line)
   if (t->exec_file != NULL)
     file_close(t->exec_file);
 
-  struct child_result *cr = palloc_get_page(0);
+  struct child_result *cr = malloc(sizeof (struct child_result));
+          //palloc_get_page(0);
   enum intr_level il = intr_disable();
   struct thread *parent = thread_from_tid(t->parent);
   if (parent != NULL) {
@@ -684,7 +686,7 @@ process_terminate(struct thread *t, int status_code, const char *cmd_line)
     list_push_back(&parent->terminated_children, &cr->elem);
   }
   else {
-    palloc_free_page(cr);
+    free(cr);
   }
   intr_set_level(il);
 

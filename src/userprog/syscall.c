@@ -7,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "devices/shutdown.h"
 #include "process.h"
 #include "filesys/filesys.h"
@@ -333,7 +334,7 @@ void handler_exec(struct intr_frame *f) {
     if (terminated_child->has_load_failed)
     {
       list_remove(&terminated_child->elem);
-      palloc_free_page(terminated_child);
+      free(terminated_child);
     }
   }
   else if (t->has_load_failed)
