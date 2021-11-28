@@ -204,7 +204,7 @@ void producer_consumer(unsigned int num_producer, unsigned int num_consumer)
     {
         char name[32];
         snprintf (name, sizeof name, "producer %d", i);
-      thread_create(name, PRI_DEFAULT, producer_thread, NULL, 0);
+        thread_create(name, PRI_DEFAULT, producer_thread, NULL);
     }
 
     /* Start consumers. */
@@ -212,7 +212,7 @@ void producer_consumer(unsigned int num_producer, unsigned int num_consumer)
     {
         char name[32];
         snprintf (name, sizeof name, "consumer %d", i);
-      thread_create(name, PRI_DEFAULT, consumer_thread, NULL, 0);
+        thread_create(name, PRI_DEFAULT, consumer_thread, NULL);
     }
 
     timer_sleep(500);
