@@ -462,7 +462,7 @@ void handler_fs_open(struct intr_frame *f) {
     return;
   }
 
-  struct file_descriptor *fd = palloc_get_page(0);
+  struct file_descriptor *fd = malloc(sizeof(struct file_descriptor));
   if (fd == NULL)
   {
     f->eax = -1;
@@ -722,5 +722,5 @@ void handler_fs_close(struct intr_frame *f) {
   list_remove(&(fd->list_elem));
   sema_up(&file_sema);
 
-  palloc_free_page(fd);
+  free(fd);
 }

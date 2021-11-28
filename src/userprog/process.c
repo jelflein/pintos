@@ -99,7 +99,7 @@ start_process(void *cmdline_ptr) {
   if (!success) {
     struct thread *t = thread_current();
 
-    struct child_result *cr = malloc(sizeof (struct child_result));
+    struct child_result *cr = malloc(sizeof(struct child_result));
     cr->pid = t->tid;
     cr->exit_code = -1;
     cr->has_load_failed = true;
@@ -186,7 +186,7 @@ process_exit(void) {
             list_elem);
 
     file_close(entry->f);
-    palloc_free_page(entry);
+    free(entry);
   }
 
   //free all child metadata entries
