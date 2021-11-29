@@ -115,8 +115,8 @@ struct thread
     char program_name[32];
     struct semaphore process_load_sema;
     struct semaphore wait_sema;
-    bool has_load_failed;
     struct list file_descriptors;
+    bool is_waited_on;
     struct list terminated_children;
     int exit_code;
     tid_t parent;

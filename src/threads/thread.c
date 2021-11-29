@@ -115,9 +115,9 @@ static bool is_thread(struct thread *)UNUSED;
     sema_init(&initial_thread->process_load_sema, 0);
     sema_init(&initial_thread->wait_sema, 0);
 
-    initial_thread->has_load_failed = false;
     initial_thread->parent = 0;
     initial_thread->exec_file = NULL;
+    initial_thread->is_waited_on = false;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -217,13 +217,13 @@ thread_create(const char *name, int priority, thread_func *function, void *aux) 
 
     sema_init(&t->process_load_sema, 0);
     sema_init(&t->wait_sema, 0);
-    t->has_load_failed = false;
 
     // user program
     list_init(&t->file_descriptors);
     list_init(&t->terminated_children);
     t->parent = thread_current()->tid;
     t->exec_file = NULL;
+    t->is_waited_on = false;
 
 
   /* Stack frame for kernel_thread(). */
@@ -641,8 +641,6 @@ struct child_result *
 thread_terminated_child_from_tid(tid_t tid, struct thread *parent)
 {
   struct list_elem *e;
-
-  ASSERT(parent == thread_current() || intr_get_level() == INTR_OFF);
 
   struct list *l = &parent->terminated_children;
 

@@ -87,34 +87,31 @@ start_process(void *cmdline_ptr) {
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load(&file_name[0], &if_.eip, &if_.esp, cmdline);
 
-  thread_current()->has_load_failed = !success;
-
   palloc_free_page(cmdline_ptr);
   palloc_free_page(file_name);
+
+
+  /*If load failed, note result in parent list*/
+  if (!success)
+  {
+    struct thread *t = thread_current();
+
+    struct thread *parent = thread_from_tid(t->parent);
+    if (parent)
+    {
+      struct child_result *cr = thread_terminated_child_from_tid(t->tid, parent);
+      ASSERT(cr != NULL);
+      cr->exit_code = -1;
+      cr->has_load_failed = true;
+    }
+  }
 
   // wake up a thread possibly waiting for our startup
   sema_up(&thread_current()->process_load_sema);
 
   /* If load failed, quit. */
-  if (!success) {
-    struct thread *t = thread_current();
-
-    struct child_result *cr = malloc(sizeof(struct child_result));
-    ASSERT(cr != NULL);
-    cr->pid = t->tid;
-    cr->exit_code = -1;
-    cr->has_load_failed = true;
-
-    struct thread *parent = thread_from_tid(t->parent);
-    if (parent != NULL)
-    {
-      list_push_back(&parent->terminated_children, &cr->elem);
-    }
-    else
-    {
-      free(cr);
-    }
-
+  if (!success)
+  {
     process_terminate_options(thread_current(), -1, thread_current()
     ->program_name, false);
   }
@@ -148,6 +145,7 @@ process_wait(tid_t tid) {
   if (t != NULL && t->parent == current->tid)
   {
     // wait for process to exit
+    t->is_waited_on = true;
     sema_down(&t->wait_sema);
   }
 
@@ -194,7 +192,23 @@ process_exit(void) {
     free(entry);
   }
 
-  //add thread pid as terminated to parent
+  if (cur->parent != 0 && !cur->is_waited_on)
+  {
+    // delete metadata from parent as nobody is / has been waiting on it and
+    // therefore also nobody else is going to free it
+    struct thread *parent = thread_from_tid(cur->parent);
+    if (parent)
+    {
+      struct child_result *cr = thread_terminated_child_from_tid(cur->tid,
+                                                                 parent);
+      if (cr != NULL)
+      {
+        list_remove(&cr->elem);
+        free(cr);
+      }
+    }
+  }
+
 
 
   /* Destroy the current process's page directory and switch back
@@ -678,19 +692,15 @@ process_terminate_options(struct thread *t, int status_code, const char
   if (t->exec_file != NULL)
     file_close(t->exec_file);
 
-  if (write_child_result)
+  if (write_child_result && t->parent != 0)
   {
-    struct child_result *cr = malloc(sizeof (struct child_result));
-    ASSERT(cr != NULL);
     struct thread *parent = thread_from_tid(t->parent);
-    if (parent != NULL) {
-      cr->pid = t->tid;
-      cr->exit_code = status_code;
-      cr->has_load_failed = t->has_load_failed;
-      list_push_back(&parent->terminated_children, &cr->elem);
-    }
-    else {
-      free(cr);
+    if (parent)
+    {
+      struct child_result *cr = thread_terminated_child_from_tid(t->tid,
+                                                                 parent);
+      if (cr != NULL)
+        cr->exit_code = status_code;
     }
   }
 

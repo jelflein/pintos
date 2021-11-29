@@ -304,6 +304,14 @@ void handler_exec(struct intr_frame *f) {
   char cmd_line[cmd_length+1];
   readu(cmd_line_ptr, sizeof cmd_line, cmd_line);
 
+  // allocate child result early to avoid out-of-memory problems
+  struct child_result *cr = malloc(sizeof(struct child_result));
+  if (cr == NULL)
+  {
+    syscall_ret_value(-1, f);
+    return;
+  }
+
   sema_down(&file_sema);
   tid_t pid = process_execute(cmd_line);
 
@@ -313,16 +321,22 @@ void handler_exec(struct intr_frame *f) {
     return;
   }
 
-  struct thread *t = thread_from_tid(pid);
+  cr->pid = pid;
+  cr->exit_code = 999;
+  cr->has_load_failed = false;
+  list_push_back(&thread_current()->terminated_children, &cr->elem);
+
+  struct thread *child_thread = thread_from_tid(pid);
   //sema sleep until loaded
-  sema_down(&t->process_load_sema);
+  child_thread->is_waited_on = true;
+  sema_down(&child_thread->process_load_sema);
   sema_up(&file_sema);
   //check if thread failed
   // the thread might be gone by now
   enum intr_level il = intr_get_level();
   intr_disable();
-  t = thread_from_tid(pid);
-  if (t == NULL)
+  child_thread = thread_from_tid(pid);
+  if (child_thread == NULL)
   {
     // thread already terminated. Look for its data in the parents list
     struct child_result *terminated_child =
@@ -337,11 +351,8 @@ void handler_exec(struct intr_frame *f) {
       free(terminated_child);
     }
   }
-  else if (t->has_load_failed)
-  {
-    syscall_ret_value(-1, f);
-  }
   else {
+    child_thread->is_waited_on = false;
     syscall_ret_value(pid, f);
   }
   intr_set_level(il);
