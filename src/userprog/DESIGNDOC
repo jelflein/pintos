@@ -119,17 +119,11 @@ struct thread {
   struct semaphore wait_sema;
   synchronization primitive to wait for process termination
 
-  bool has_load_failed;
-  used to indicate failed process loading
-
   struct list file_descriptors;
   list of file descriptors which this process possesses
 
   struct list terminated_children;
   list of metadata for terminated child processes of this process
-
-  int exit_code;
-  exit code of this process
 
   tid_t parent;
   reference to parent process
@@ -143,9 +137,16 @@ struct thread {
 new structs
 struct child_result { metadata about exited child process.
     tid_t pid;
+    pid of this process
+
     int exit_code;
+    exit code of this process
+
     struct list_elem elem;
+    linked list element
+
     bool has_load_failed;
+    used to indicate failed process loading
 };
 
 struct file_descriptor { maps file descriptor id to file pointer.
@@ -159,7 +160,8 @@ struct file_descriptor { maps file descriptor id to file pointer.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
 
-Each process has their own descriptor table, which maps file descriptors to file pointers.
+Each process has their own descriptor table (actually a linked list of struct file_descriptor),
+which maps file descriptors to file pointers.
 File descriptors are unique within a process, not within the whole OS.
 
 
@@ -187,11 +189,13 @@ Firstly we do the appropriate safety checks. Is the process actually a
  child of the current process etc.
 Wait works by waiting on the semaphore wait_sema of the specific process
  to be waited on.
-The exit system call handler puts a struct child_result in the parents
- list which contains exit code and pid of the
-exited child process. When execution returns to the wait syscall handler,
+The exit system call handler (actually process_terminate called from syscall)
+ puts the exit code into the corresponding
+ struct child_result for this child process in the parents
+ list. Then the semaphore is signaled.
+ When execution returns to the wait syscall handler,
  it looks up this struct in the parents list
-and returns the exit code.
+and returns the stored exit code.
 
 
 >> B6: Any access to user program memory at a user-specified address
@@ -208,39 +212,43 @@ and returns the exit code.
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 We use our functions readu and writeu to access user memory. Those
- functions terminate the child process in the case of a page fault.
- The normal process termination functions are called which will
- clean up all opened files  and memory of the process.
+functions terminate the child process in the case of a page fault.
+The normal process termination functions are called which will
+clean up all opened files  and memory of the process.
 
- In handler_fs_open, we carefully ordered our code so that all
- necessary reads from userland are done before allocating memory
- for the file handle struct. This way, the struct cannot be leaked
- by an early function exit on a page fault.
+In handler_fs_open, we carefully ordered our code so that all
+necessary reads from userland are done before allocating memory
+for the file handle struct. This way, the struct cannot be leaked
+by an early function exit on a page fault. Either the function will
+return early (process terminated), or no page faults occurred and the
+resource allocation is fine without any leaks.
 
- For temporary locks like the filesystem lock, it gets more tricky.
- In the handler for SYS_WRITE, we lock the filesystem and
- in a loop do file_read() followed by a write to the userland.
- To unlock the file system lock even when a page fault occurs,
- we introduced a special function try_writeu. It doesn't immediately
- terminate the user process but instead returns false, which gives the
- syscall handler the chance to unlock the lock before terminating
- the user process.
+For temporary locks like the filesystem lock, it gets more tricky.
+In the handler for SYS_WRITE, we lock the filesystem and
+in a loop do file_read() followed by a write to the userland.
+To unlock the file system lock even when a page fault occurs,
+we introduced a special function try_writeu. It doesn't immediately
+terminate the user process but instead returns false, which gives the
+syscall handler the chance to unlock the lock before terminating
+the user process.
 
- if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer))
- {
-   sema_up(&file_sema);
-   process_terminate(thread_current(), -1, thread_current()
-           ->program_name);
- }
+if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer))
+{
+sema_up(&file_sema);
+process_terminate(thread_current(), -1, thread_current()
+       ->program_name);
+}
 
- We try to keep the use of the try_ functions to a minimum as
- it results in many if-branches that make the code harder to read.
+We only use the try_writeu function once because
+it results in many if-branches that make the code harder to read.
 
- In general, systems programmers often use the goto statement
- to emulate try-catch style semantics from higher level languages.
- We see the benefits but also worry about the error-prone nature
- of it, see the famous "goto fail" bug from Apple a few years ago.
+In general, systems programmers often use the goto statement
+to emulate try-catch style semantics from higher level languages.
+We see the benefits but also worry about the error-prone nature
+of it, see the famous "goto fail" bug from Apple a few years ago.
 
+In our case there were not many temporary resources to worry about
+so the approach explained above works well for this project.
 
 
 ---- SYNCHRONIZATION ----
@@ -250,21 +258,15 @@ We use our functions readu and writeu to access user memory. Those
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
 
-We use a semaphore to wait. The sys. call exec invokes
+We use a semaphore to wait. The syscall exec invokes
 the process_execute function, after this it will check the pid. If the pid
-is not -1, then it will wait until the process is finish with loading
-(using the loading semaphore). The semaphore will be unlocked after the
-load() function. The thread struct. has an attribute "has_load_failed"
-(set after the load function), if this attribute true, then the syscall
- returns -1.
-
-Some notes:
-The exec. sys. call disable the interrupts to search the pid in the
-thread list (it is a very short amount of time). This is not the best impl.
-You can avoid this, if you extend the thread struct. with variables. This
-source of this design "fault" is, that we assume the same behaviour
-as in timer.c (interrupts disabled), but this behaviour is only for
-external interrupts.
+is not -1, then it will wait until the process is finished loading
+(using the thread.process_load_sema). After an unsuccessful load, start_process
+will write the failure status to the parents list of child process metadata.
+Then the semaphore will be unlocked.
+After the exec syscall handler is done waiting on the semaphore, it will
+check the child process metadata of the current process (=parent of child
+process). If the load failed, it will return -1 to userland.
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -273,13 +275,16 @@ external interrupts.
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+A process can not call wait on a process before it exists. That is because
+the exec syscall waits until the new process is fully loaded.
+And a process is only allowed to wait on direct child processes.
+
 To find out whether a child process or parent process still exists (is still
-running /
-waiting), we disable interrupts for this short critical section to avoid
-race conditions.
+running / waiting), we disable interrupts for this short critical section
+and iterate through the process list, looking for the process.
 
 When the child thread still exists, we wait for it to finish using a
-semaphore. The function process_exit, called from the exit syscall handler
+semaphore. In the function process_exit, called from the exit syscall handler
 and error handling code, metadata like exit code of this process are put
 into a list of the parent process (only if parent still exists).
 
@@ -293,6 +298,15 @@ handler and,
 through a few function calls, in places where a process is terminated
 for invalid pointers etc. That way no resources are leaked.
 
+If the child process does not exist anymore but it is the first time that
+P calls wait on that PID, then we just look up the exit code in P's
+child process metadata list and return that, thereby also removing and
+freeing that list element.
+This works because wait may only be called once on a given process.
+
+If P never calls wait on C, the child process metadata will be released
+when the process of P is terminated.
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
@@ -302,26 +316,28 @@ We need to read user data for the sys. calls. The address of the pointer must
 be in the user address space ( < PHYS_BASE), this will be checked in our
 function readu. We copy the data
 from the user space to the kernel space. We use the get_user/put_user
-to avoid sig_faults and gracefully terminate the user process.
+to avoid sig_faults and gracefully terminate the user process if necessary.
 To make get_user and put_user work, we put the appropriate handling
-code into the page fault handler.
+code into the page fault handler (taken from course website).
+
+We used this technique because it seemed to be the simplest approach
+to implement.
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
-We keep a list of file descriptors for every process. In the current impl.
-two process can write to the same file, if a kernel task will
-interrupt and write to the same file.
-We allocate a piece of memory for every file descriptor. The pintos
-kernel allocator
-It is also very bad for the memory, because we allocate 4kb for
-every fd.
+We keep a list of file descriptors for every process.
+We allocate a piece of memory (struct file_descriptor) for every
+file descriptor and keep them in the linked list
+thread.file_descriptors.
 
-An advantage is that you do not need any "global" sync. This is
-very good for the speed. If the process terminated, you can
-easy close every file, because the every thread/process as
-a list with the fds. If you write to a file, you will find
-the correct fd very fast (except you open a lot of).
++ This approach has no fixed maximum number of file handles per process.
++ It is easy to modify the linked list, remove items in the middle etc.
++ No global sync needed as FD list is local to process
++ Easy to close all open files on process exit
+- We use dynamic memory
+- We cannot share file descriptors between processes because every
+process has their own FD list
 
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
@@ -344,12 +360,19 @@ the quarter.
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+Definitely
 
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
+Would be nice to know how we should handle every failure case in syscalls
+specifically. This was not on the course website but it turned out that the
+tests require very specific error handling (return 0 in this case,
+terminate the process with exit code -1 in another failure case).
+It would have been easier if this info was available up front.
 
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
 
 >> Any other comments?
+The Multi-OOM test is quite hard to understand and also debug
