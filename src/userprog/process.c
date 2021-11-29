@@ -100,11 +100,11 @@ start_process(void *cmdline_ptr) {
     struct thread *t = thread_current();
 
     struct child_result *cr = malloc(sizeof(struct child_result));
+    ASSERT(cr != NULL);
     cr->pid = t->tid;
     cr->exit_code = -1;
     cr->has_load_failed = true;
 
-    enum intr_level il = intr_disable();
     struct thread *parent = thread_from_tid(t->parent);
     if (parent != NULL)
     {
@@ -115,10 +115,8 @@ start_process(void *cmdline_ptr) {
       free(cr);
     }
 
-    intr_set_level(il);
-
-    //thread_exit();
-    process_terminate(thread_current(), -1, thread_current()->program_name);
+    process_terminate_options(thread_current(), -1, thread_current()
+    ->program_name, false);
   }
 
 
@@ -663,10 +661,15 @@ install_page(void *upage, void *kpage, bool writable) {
 }
 
 
-
-
 NO_RETURN void
 process_terminate(struct thread *t, int status_code, const char *cmd_line)
+{
+  process_terminate_options(t, status_code, cmd_line, true);
+}
+
+NO_RETURN void
+process_terminate_options(struct thread *t, int status_code, const char
+        *cmd_line, bool write_child_result)
 {
   printf("%s: exit(%d)\n", cmd_line, status_code);
 
@@ -675,20 +678,21 @@ process_terminate(struct thread *t, int status_code, const char *cmd_line)
   if (t->exec_file != NULL)
     file_close(t->exec_file);
 
-  struct child_result *cr = malloc(sizeof (struct child_result));
-          //palloc_get_page(0);
-  enum intr_level il = intr_disable();
-  struct thread *parent = thread_from_tid(t->parent);
-  if (parent != NULL) {
-    cr->pid = t->tid;
-    cr->exit_code = status_code;
-    cr->has_load_failed = t->has_load_failed;
-    list_push_back(&parent->terminated_children, &cr->elem);
+  if (write_child_result)
+  {
+    struct child_result *cr = malloc(sizeof (struct child_result));
+    ASSERT(cr != NULL);
+    struct thread *parent = thread_from_tid(t->parent);
+    if (parent != NULL) {
+      cr->pid = t->tid;
+      cr->exit_code = status_code;
+      cr->has_load_failed = t->has_load_failed;
+      list_push_back(&parent->terminated_children, &cr->elem);
+    }
+    else {
+      free(cr);
+    }
   }
-  else {
-    free(cr);
-  }
-  intr_set_level(il);
 
   sema_up(&t->wait_sema);
 

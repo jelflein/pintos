@@ -10,5 +10,8 @@ void process_activate (void);
 
 NO_RETURN void
 process_terminate(struct thread *t, int status_code, const char *cmd_line);
+NO_RETURN void
+process_terminate_options(struct thread *t, int status_code, const char
+*cmd_line, bool write_child_result);
 
 #endif /* userprog/process.h */
