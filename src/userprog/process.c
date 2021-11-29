@@ -112,8 +112,8 @@ start_process(void *cmdline_ptr) {
   /* If load failed, quit. */
   if (!success)
   {
-    process_terminate_options(thread_current(), -1, thread_current()
-    ->program_name, false);
+    process_terminate(thread_current(), -1, thread_current()
+    ->program_name);
   }
 
 
@@ -659,19 +659,12 @@ install_page(void *upage, void *kpage, bool writable) {
 NO_RETURN void
 process_terminate(struct thread *t, int status_code, const char *cmd_line)
 {
-  process_terminate_options(t, status_code, cmd_line, true);
-}
-
-NO_RETURN void
-process_terminate_options(struct thread *t, int status_code, const char
-        *cmd_line, bool write_child_result)
-{
   printf("%s: exit(%d)\n", cmd_line, status_code);
 
   if (t->exec_file != NULL)
     file_close(t->exec_file);
 
-  if (write_child_result && t->parent != 0)
+  if (t->parent != 0)
   {
     struct thread *parent = thread_from_tid(t->parent);
     if (parent)
