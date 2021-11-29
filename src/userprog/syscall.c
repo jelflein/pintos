@@ -328,7 +328,6 @@ void handler_exec(struct intr_frame *f) {
 
   struct thread *child_thread = thread_from_tid(pid);
   //sema sleep until loaded
-  child_thread->is_waited_on = true;
   sema_down(&child_thread->process_load_sema);
   sema_up(&file_sema);
   //check if thread failed
@@ -352,7 +351,6 @@ void handler_exec(struct intr_frame *f) {
     }
   }
   else {
-    child_thread->is_waited_on = false;
     syscall_ret_value(pid, f);
   }
   intr_set_level(il);

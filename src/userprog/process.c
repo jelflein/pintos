@@ -145,7 +145,6 @@ process_wait(tid_t tid) {
   if (t != NULL && t->parent == current->tid)
   {
     // wait for process to exit
-    t->is_waited_on = true;
     sema_down(&t->wait_sema);
   }
 
@@ -191,24 +190,6 @@ process_exit(void) {
     struct child_result *entry = list_entry(e, struct child_result, elem);
     free(entry);
   }
-
-  if (cur->parent != 0 && !cur->is_waited_on)
-  {
-    // delete metadata from parent as nobody is / has been waiting on it and
-    // therefore also nobody else is going to free it
-    struct thread *parent = thread_from_tid(cur->parent);
-    if (parent)
-    {
-      struct child_result *cr = thread_terminated_child_from_tid(cur->tid,
-                                                                 parent);
-      if (cr != NULL)
-      {
-        list_remove(&cr->elem);
-        free(cr);
-      }
-    }
-  }
-
 
 
   /* Destroy the current process's page directory and switch back
@@ -686,8 +667,6 @@ process_terminate_options(struct thread *t, int status_code, const char
         *cmd_line, bool write_child_result)
 {
   printf("%s: exit(%d)\n", cmd_line, status_code);
-
-  t->exit_code = status_code;
 
   if (t->exec_file != NULL)
     file_close(t->exec_file);

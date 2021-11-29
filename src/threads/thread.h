@@ -116,9 +116,7 @@ struct thread
     struct semaphore process_load_sema;
     struct semaphore wait_sema;
     struct list file_descriptors;
-    bool is_waited_on;
     struct list terminated_children;
-    int exit_code;
     tid_t parent;
     struct file *exec_file;
 #endif
