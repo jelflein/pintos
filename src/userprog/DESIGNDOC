@@ -69,7 +69,6 @@ the begin of the first arg (we increase this also in the loop).
 We use a overflow function to detect it. It use the size of the data frame,
 arc for the amount of pointers and 16bytes for return address, null sentinel etc.
 It is not 100% correct, but it is very simple and fast.
-It will not detect double space etc.
 
 
 ---- RATIONALE ----
@@ -182,6 +181,13 @@ user process with exit code -1
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+The least amount is 1. The greatest is 4096. The get_user function reads only
+1 byte. If you use the full size of the page, you use this function 4096 etc.
+
+For a system call with 2 bytes of data it should be 2 inspections.
+
+You can improve the speed (I didnt see any cache in the code),
+if you use a cache, but on x86 the cache will flush after a context switch.
 
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
