@@ -1,0 +1,49 @@
+# Supplemental page table
+
+enum status {
+    zeroes,
+    code_page_thrown_out?,
+    swap,
+    framed,
+    mapped_file
+}
+
+
+
+v_page_id | pid | status | mapped file??
+
+  spte->upage = upage;
+  spte->kpage = NULL;
+  spte->status = FROM_FILESYS;
+  spte->dirty = false;
+  spte->file = file;
+  spte->file_offset = offset;
+  spte->read_bytes = read_bytes;
+  spte->zero_bytes = zero_bytes;
+  spte->writable = writable;
+
+
+# file_pages
+
+v_page_id | pid | file
+
+
+# Page fault handler:
+In case of swapped-out page:
+Load in page, add correct entry to page table, return from page fault.
+The user program will attempt to do the memory operation again, this time succeeding.
+
+
+Bitmap data structure to keep track of empty frames.
+
+# Swap table
+Bitmap keeping track of free swap "frames"
+
+
+# stack growth
+in page fault, guess if the access is a stack overflow. We can guess based on current stack pointer of the user program and
+the fault address. If the page fault address is slightly lower, it is likely the user program wants to grow the stack.
+
+# Notes
+* 4.3.3: We might have a page fault inside a page fault: We rely on page faults in get_user. Be careful when using that inside a page fault handler!
+* Can we implement lazy code loading using memory-mapped files?
