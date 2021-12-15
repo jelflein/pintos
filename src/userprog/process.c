@@ -20,6 +20,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "vm/frame.h"
 
 static thread_func start_process NO_RETURN;
 
@@ -566,7 +567,7 @@ setup_stack(void **esp, const char *arg_line) {
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+  kpage = allocate_frame(thread_current(), PAL_ZERO);
   if (kpage != NULL) {
     success = install_page(((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
     if (success) {
@@ -630,7 +631,7 @@ setup_stack(void **esp, const char *arg_line) {
       *argv = 0;
       *esp = argv;
     } else {
-      palloc_free_page(kpage);
+      free_frame(kpage);
     }
   }
   return success;

@@ -44,6 +44,13 @@ Bitmap keeping track of free swap "frames"
 in page fault, guess if the access is a stack overflow. We can guess based on current stack pointer of the user program and
 the fault address. If the page fault address is slightly lower, it is likely the user program wants to grow the stack.
 
+
+# frame table
+page address OR NULL
+pid
+
+
+
 # Notes
 * 4.3.3: We might have a page fault inside a page fault: We rely on page faults in get_user. Be careful when using that inside a page fault handler!
 * Can we implement lazy code loading using memory-mapped files?
