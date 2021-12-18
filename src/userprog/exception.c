@@ -172,12 +172,12 @@ page_fault (struct intr_frame *f)
     stack_pointer = t->user_esp;
   }
 
-  /*
-   *   on_stack_frame = (esp <= fault_addr || fault_addr == f->esp - 4 || fault_addr == f->esp - 32)
-   *   is_stack_addr = (PHYS_BASE - MAX_STACK_SIZE <= fault_addr && fault_addr < PHYS_BASE);
-   */
-  if (spt_entry == NULL && ABS(stack_pointer - fault_addr) <= 32 &&
-  stack_pointer < PHYS_BASE)
+  if (spt_entry == NULL
+    && (
+      ((stack_pointer > fault_addr) && ((uint32_t)stack_pointer - (uint32_t)fault_addr <= 32))
+      || fault_addr > stack_pointer
+      )
+    && fault_addr < PHYS_BASE)
   {
     // grow stack logic
     //create spt entry
