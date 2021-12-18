@@ -1,1 +1,3 @@
-source /home/parallels/CLionProjects/pintos/src/misc/gdb-macros
+source src/misc/gdb-macros
+loadusersymbols src/examples/echo
+

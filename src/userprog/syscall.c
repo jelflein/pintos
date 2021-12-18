@@ -70,10 +70,13 @@ syscall_handler(struct intr_frame *f) {
   int *stack = f->esp;
 
   check_ptr(stack);
+  struct thread *t = thread_current();
 
   if (get_user((const uint8_t *) stack) == -1) {
-    process_terminate(thread_current(), -1, thread_current()->program_name);
+    process_terminate(t, -1, t->program_name);
   }
+
+  t->user_esp = f->esp;
 
   switch (*stack) {
     case SYS_EXIT: {
@@ -132,6 +135,7 @@ syscall_handler(struct intr_frame *f) {
       printf("invalid system call!\n");
       process_terminate(thread_current(), -1, thread_current()->program_name);
   }
+  t->user_esp = NULL;
 }
 
 static void handler_exit(int *stack) {/*

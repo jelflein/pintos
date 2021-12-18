@@ -119,6 +119,7 @@ struct thread
     struct list terminated_children;
     tid_t parent;
     struct file *exec_file;
+    uint8_t *user_esp;                     /* Saved stack pointer. */
 #endif
 
     /* Owned by thread.c. */

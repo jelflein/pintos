@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <list.h>
+#include <vm/page.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -479,7 +480,8 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs(upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  file_seek(file, ofs);
+  off_t file_offset = ofs;
+
   while (read_bytes > 0 || zero_bytes > 0) {
     /* Calculate how to fill this page.
        We will read PAGE_READ_BYTES bytes from FILE
@@ -487,22 +489,21 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
     size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
     size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-    /* Get a page of memory. */
-    uint8_t *kpage = palloc_get_page(PAL_USER);
-    if (kpage == NULL)
-      return false;
-
-    /* Load this page. */
-    if (file_read(file, kpage, page_read_bytes) != (int) page_read_bytes) {
-      palloc_free_page(kpage);
-      return false;
+    if (page_read_bytes == 0)
+    {
+      if (!spt_entry_empty((uint32_t)upage, thread_current()->tid, writable,
+                           zeroes))
+      {
+        return false;
+      }
     }
-    memset(kpage + page_read_bytes, 0, page_zero_bytes);
-
-    /* Add the page to the process's address space. */
-    if (!install_page(upage, kpage, writable)) {
-      palloc_free_page(kpage);
-      return false;
+    else {
+      /* Add the page to the process's address space. */
+      if (!spt_entry_mapped_file((uint32_t)upage, thread_current()->tid, writable,
+                                 file, file_offset, page_read_bytes)) {
+        return false;
+      }
+      file_offset += (int)page_read_bytes;
     }
 
     /* Advance. */
@@ -564,77 +565,73 @@ overflow(unsigned int argc, unsigned int size_of_cmd_line, unsigned int align) {
    user virtual memory. */
 static bool
 setup_stack(void **esp, const char *arg_line) {
-  uint8_t *kpage;
-  bool success = false;
 
-  kpage = allocate_frame(thread_current(), PAL_ZERO);
-  if (kpage != NULL) {
-    success = install_page(((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-    if (success) {
-      *esp = PHYS_BASE;
-      //daten drauf
-      char *current_stack_bottom = PHYS_BASE - 4;
-
-      char *t;
-      char *remainder = (char *) arg_line;
-
-      //char *c;
-      unsigned argc = countParams(arg_line);
-      remainder = (char *) arg_line;
-
-      if (overflow(argc, 0, 0)) return false;
-
-      unsigned int arg_line_size = strlen(arg_line);
-      //calc. the start of the address space (argv)
-      void *address_space = current_stack_bottom - arg_line_size - 1;
-      // word-align
-      unsigned int align = ((unsigned) address_space) % 4;
-      address_space -= align;
-      // write terminating sentinel of argv
-      char **argv = address_space;
-      // make space for address table sentinel
-      argv--;
-      *argv = 0;
-      argv--;
-      // write addresses of the arguments here
-
-      char **address_table = argv;
-      address_table -= argc - 1;
-
-      unsigned int current_data_size = 0;
-      while ((t = strtok_r(remainder, " ", &remainder)) != NULL) {
-        //strlen without \0
-        unsigned arg_size = strlen(t);
-
-        current_data_size += arg_size + 1;
-        if (overflow(argc, current_data_size, align)) return false;
-
-        char *string_address = current_stack_bottom - arg_size - 1;
-        //strlcpy add \0 to length
-        strlcpy(string_address, t, arg_size + 1);
-        current_stack_bottom -= arg_size + 1;
-
-        *address_table = string_address;
-        address_table++;
-        argv--;
-      }
-
-      //argv--;
-      // argv on the stack (make sure it points to argv[0]
-      //point to argument table
-      *argv = (char *) (argv + 1);
-      argv -= 1;
-      //argc on the stack
-      *argv = (char *) argc;
-      argv -= 1;
-      //return address of the stack
-      *argv = 0;
-      *esp = argv;
-    } else {
-      free_frame(kpage);
-    }
+  if (!spt_entry(((uint32_t)PHYS_BASE) - PGSIZE, thread_current()
+                         ->tid, 0, true,
+                 zeroes)) {
+    return false;
   }
-  return success;
+
+
+  *esp = PHYS_BASE;
+  //daten drauf
+  char *current_stack_bottom = PHYS_BASE - 4;
+
+  char *t;
+  char *remainder = (char *) arg_line;
+
+  //char *c;
+  unsigned argc = countParams(arg_line);
+  remainder = (char *) arg_line;
+
+  if (overflow(argc, 0, 0)) return false;
+
+  unsigned int arg_line_size = strlen(arg_line);
+  //calc. the start of the address space (argv)
+  void *address_space = current_stack_bottom - arg_line_size - 1;
+  // word-align
+  unsigned int align = ((unsigned) address_space) % 4;
+  address_space -= align;
+  // write terminating sentinel of argv
+  char **argv = address_space;
+  // make space for address table sentinel
+  argv--;
+  *argv = 0;
+  argv--;
+  // write addresses of the arguments here
+
+  char **address_table = argv;
+  address_table -= argc - 1;
+
+  unsigned int current_data_size = 0;
+  while ((t = strtok_r(remainder, " ", &remainder)) != NULL) {
+    //strlen without \0
+    unsigned arg_size = strlen(t);
+
+    current_data_size += arg_size + 1;
+    if (overflow(argc, current_data_size, align)) return false;
+
+    char *string_address = current_stack_bottom - arg_size - 1;
+    //strlcpy add \0 to length
+    strlcpy(string_address, t, arg_size + 1);
+    current_stack_bottom -= arg_size + 1;
+
+    *address_table = string_address;
+    address_table++;
+    argv--;
+  }
+  // argv on the stack (make sure it points to argv[0]
+  //point to argument table
+  *argv = (char *) (argv + 1);
+  argv -= 1;
+  //argc on the stack
+  *argv = (char *) argc;
+  argv -= 1;
+  //return address of the stack
+  *argv = 0;
+  *esp = argv;
+
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

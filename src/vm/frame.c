@@ -32,7 +32,7 @@ void *allocate_frame(struct thread *t, enum palloc_flags fgs)
 
   ASSERT(u_frame != NULL)
 
-  printf("vtop(u_frame) >> 12 = %u\n" , vtop(u_frame) >> 12);
+  //printf("vtop(u_frame) >> 12 = %u\n" , vtop(u_frame) >> 12);
 
   // TODO: use page address here
   frame_table[vtop(u_frame) >> 12] = entry_create(u_frame);
@@ -59,8 +59,6 @@ void frame_table_init()
   //Too much memory exclud. k_pages
   num_frames = init_ram_pages;
   uint32_t table_size_bytes = num_frames * 4;
-
-  uint32_t page_num = divide_round_up(table_size_bytes, PGSIZE);
 
   frame_table = palloc_get_multiple(PAL_ZERO | PAL_ASSERT,
                                     divide_round_up(table_size_bytes, PGSIZE));

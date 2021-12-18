@@ -1,11 +1,17 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <threads/vaddr.h>
+#include <vm/page.h>
+#include <vm/frame.h>
+#include <threads/palloc.h>
+#include <filesys/file.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "lib/kernel/debug.h"
 #include "process.h"
+#include "pagedir.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -110,6 +116,8 @@ kill (struct intr_frame *f)
     }
 }
 
+#define ABS(x) (((x) < 0) ? -(x) : (x))
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -152,6 +160,62 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
+  struct thread *t = thread_current();
+  struct spt_entry *spt_entry = spt_get_entry(page_vaddr, t
+          ->tid);
+
+  void* stack_pointer = f->esp;
+
+  if (t->user_esp != NULL && !user)
+  {
+    stack_pointer = t->user_esp;
+  }
+
+  /*
+   *   on_stack_frame = (esp <= fault_addr || fault_addr == f->esp - 4 || fault_addr == f->esp - 32)
+   *   is_stack_addr = (PHYS_BASE - MAX_STACK_SIZE <= fault_addr && fault_addr < PHYS_BASE);
+   */
+  if (spt_entry == NULL && ABS(stack_pointer - fault_addr) <= 32 &&
+  stack_pointer < PHYS_BASE)
+  {
+    // grow stack logic
+    //create spt entry
+    bool success = spt_entry_empty(page_vaddr, t->tid ,true, zeroes);
+    if (!success) process_terminate(t, -1, t->program_name);
+
+    spt_entry = spt_get_entry(page_vaddr, t->tid);
+  }
+
+  if (spt_entry != NULL) {
+    // SPT entry but no mapping in page table exists yet
+    void *frame_pointer = allocate_frame(t, PAL_ZERO);
+
+    //Install page
+    bool success = pagedir_set_page(t->pagedir, (void *) page_vaddr,
+                                    frame_pointer,
+                                    spt_entry->writable);
+
+    if (spt_entry->spe_status == mapped_file) {
+      // read contents from file into newly allocated frame
+      file_seek(spt_entry->file, (int)spt_entry->file_offset);
+      file_read(spt_entry->file, frame_pointer, (int)spt_entry->read_bytes);
+
+      spt_entry->spe_status = frame;
+    }
+    else if (spt_entry->spe_status == zeroes)
+    {
+      spt_entry->spe_status = frame;
+    }
+    else {
+      ASSERT(0);
+    }
+
+    ASSERT(success);
+
+    return;
+  }
+
   if (!user) {
     // They also assume that you've modified page_fault() so that a page fault
     // in the kernel merely sets eax to 0xffffffff and copies its former value
@@ -162,7 +226,7 @@ page_fault (struct intr_frame *f)
   }
   else {
     // user program caused page fault
-    process_terminate(thread_current(), -1, thread_current()->program_name);
+    process_terminate(t, -1, t->program_name);
   }
 
   /* To implement virtual memory, delete the rest of the function

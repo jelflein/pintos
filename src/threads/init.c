@@ -8,7 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vm/frame.h>
+#include "vm/frame.h"
+#include "vm/page.h"
 #include "devices/kbd.h"
 #include "devices/input.h"
 #include "devices/serial.h"
@@ -189,6 +190,7 @@ paging_init (void)
   asm volatile ("movl %0, %%cr3" : : "r" (vtop (init_page_dir)));
 
   frame_table_init();
+  spt_init();
 }
 
 /* Breaks the kernel command line into words and returns them as
