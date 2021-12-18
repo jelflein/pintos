@@ -172,9 +172,12 @@ page_fault (struct intr_frame *f)
     stack_pointer = t->user_esp;
   }
 
+  // TODO: Implement stack size limit
   if (spt_entry == NULL
     && (
+      // PUSH, CALL or PUSH instruction may fault 4 or 32 bytes above the stack
       ((stack_pointer > fault_addr) && ((uint32_t)stack_pointer - (uint32_t)fault_addr <= 32))
+      // faults inside the stack
       || fault_addr > stack_pointer
       )
     && fault_addr < PHYS_BASE)
