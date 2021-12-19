@@ -137,8 +137,6 @@ page_fault (struct intr_frame *f)
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
 
-  //print_stacktrace(thread_current(), NULL);
-
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
      data.  It is not necessarily the address of the instruction
@@ -160,17 +158,21 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
   struct thread *t = thread_current();
+  bool is_syscall = t->user_esp != NULL && !user;
+
+  if ((user || is_syscall) && !not_present)
+  {
+    // user or kernel (might be syscall) tried to write to RO page
+    process_terminate(t, -1, t->program_name);
+  }
+
+  uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
   struct spt_entry *spt_entry = spt_get_entry(page_vaddr, t
           ->tid);
 
   void* stack_pointer = f->esp;
-
-  if (t->user_esp != NULL && !user)
-  {
-    stack_pointer = t->user_esp;
-  }
+  if (is_syscall) stack_pointer = t->user_esp;
 
   // TODO: Implement stack size limit
   if (spt_entry == NULL
