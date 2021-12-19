@@ -50,6 +50,18 @@ page address OR NULL
 pid
 
 
+# mapped files
+# table of mapped files
+linked list or table of file mappings
+save file struct pointer and mapping metadata. At munmap or process exit, close file and remove entry.
+Remove SPT entries and page frames
+
+# out of memory situation:
+find page to evict.
+* code pages can be evicted easily, no need to use swap
+* data pages can be evicted. If has been modified, write to swap.
+
+
 
 # Notes
 * 4.3.3: We might have a page fault inside a page fault: We rely on page faults in get_user. Be careful when using that inside a page fault handler!
