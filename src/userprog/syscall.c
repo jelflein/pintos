@@ -229,7 +229,7 @@ static bool try_writeu(const void *src, const size_t s, void *dest)
     check_ptr(current_ptr);
 
     int res = put_user(current_ptr, ((uint8_t *)src)[i]);
-    if (res == -1)
+    if (!res)
       return false;
   }
   return true;
