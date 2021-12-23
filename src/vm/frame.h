@@ -1,4 +1,6 @@
 
+#include <filesys/off_t.h>
+
 struct thread;
 enum palloc_flags;
 

@@ -112,6 +112,8 @@ static bool is_thread(struct thread *)UNUSED;
     list_init(&initial_thread->file_descriptors);
     list_init(&initial_thread->terminated_children);
 
+    list_init(&initial_thread->mapped_files);
+
     sema_init(&initial_thread->process_load_sema, 0);
     sema_init(&initial_thread->wait_sema, 0);
 
@@ -220,6 +222,8 @@ thread_create(const char *name, int priority, thread_func *function, void *aux) 
     // user program
     list_init(&t->file_descriptors);
     list_init(&t->terminated_children);
+    list_init(&t->mapped_files);
+
     t->parent = thread_current()->tid;
     t->exec_file = NULL;
 

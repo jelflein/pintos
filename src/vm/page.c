@@ -6,8 +6,7 @@
 #include "../lib/user/syscall.h"
 #include "../lib/stdio.h"
 #include "../threads/malloc.h"
-
-
+#include "../threads/vaddr.h"
 
 
 struct hash spt;
@@ -124,4 +123,12 @@ struct spt_entry *spt_get_entry(uint32_t vaddr, pid_t pid)
   return hash_entry(elem, struct spt_entry, elem);
 }
 
+bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid) {
+    uint32_t file_size_bits = file_size * 8;
 
+    for(int i = 0; i <= (file_size_bits / PGSIZE); i++) {
+        if (spt_get_entry(addr ^ (i * PGSIZE), pid) != NULL) return true;
+    }
+
+    return false;
+}

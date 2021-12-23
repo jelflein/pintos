@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <filesys/off_t.h>
 #include "../lib/user/syscall.h"
 #include "../lib/kernel/hash.h"
 
@@ -42,6 +43,12 @@ struct spt_entry {
     struct hash_elem elem;
 };
 
+struct m_file {
+    int id;
+    struct list_elem list_elem;
+    struct file *file;
+};
+
 void spt_init(void);
 
 bool spt_entry(uint32_t vaddr, pid_t pid, uint32_t paddr, bool writable, enum
@@ -56,3 +63,5 @@ bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
 
 
 struct spt_entry *spt_get_entry(uint32_t vaddr, pid_t pid);
+
+bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid);

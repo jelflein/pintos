@@ -13,6 +13,8 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include <string.h>
+#include <vm/page.h>
+#include "vm/frame.h"
 
 #define MIN(a,b)             \
 ({                           \
@@ -54,6 +56,10 @@ void handler_fs_tell(struct intr_frame *);
 void handler_wait(struct intr_frame *);
 
 void handler_fs_close(struct intr_frame *);
+
+void handler_mmap(struct intr_frame *);
+
+void handler_munmap(struct intr_frame *);
 
 static void handler_exit(int *stack);
 
@@ -130,6 +136,14 @@ syscall_handler(struct intr_frame *f) {
     case SYS_CLOSE: {
       handler_fs_close(f);
       break;
+    }
+    case SYS_MMAP: {
+        handler_mmap(f);
+        break;
+    }
+    case SYS_MUNMAP: {
+        handler_munmap(f);
+        break;
     }
     default:
       printf("invalid system call!\n");
@@ -438,6 +452,26 @@ find_file_descriptor(int fd, struct thread *thread) {
   return NULL;
 }
 
+static struct m_file *
+find_mfile(int map_id, struct thread *thread) {
+    struct list_elem *e;
+    ASSERT( thread == thread_current() || intr_get_level() == INTR_OFF);
+
+    for (e = list_begin(&thread->mapped_files);
+         e != list_end(&thread->mapped_files);
+         e = list_next(e))
+    {
+        struct m_file *entry = list_entry(e,
+                                                   struct m_file, list_elem);
+
+        if (entry->id == map_id)
+        {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
 void handler_fs_open(struct intr_frame *f) {
   int *stack = f->esp;
 
@@ -736,4 +770,136 @@ void handler_fs_close(struct intr_frame *f) {
   sema_up(&file_sema);
 
   free(fd);
+}
+
+//TODO sync!
+void handler_mmap(struct intr_frame *f){
+    int *stack = f->esp;
+
+    //args
+    int fd_id;
+    readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+
+    void *addr;
+    readu((const void *) (stack + 2), sizeof(addr), &addr);
+
+    //Address == 0
+    if (addr == 0 || addr >= PHYS_BASE) {
+        f->eax = -1;
+        return;
+    }
+
+    //wrong fd_id
+    if (fd_id == 0 || fd_id == 1) {
+        f->eax = -1;
+        return;
+    }
+
+    //not paged alinged
+    if (((uint32_t) addr) % PGSIZE != 0) {
+        f->eax = -1;
+        return;
+    }
+
+    struct thread *t = thread_current();
+
+    //lock
+    sema_down(&file_sema);
+    struct file_descriptor *fd = find_file_descriptor(fd_id, t);
+
+    if (fd == 0)
+    {
+        f->eax = -1;
+        sema_up(&file_sema);
+        return;
+    }
+
+    //check is not zero
+    if (file_length(fd->f) == 0) {
+        f->eax = -1;
+        sema_up(&file_sema);
+        return;
+    }
+
+    //check overlaping
+    if (spt_file_overlaping((uint32_t) addr,file_length(fd->f), t->tid)) {
+        f->eax = -1;
+        sema_up(&file_sema);
+        return;
+    }
+
+    struct file *reopend_file = file_reopen(fd->f);
+    sema_up(&file_sema);
+
+    if (reopend_file == NULL)
+    {
+        f->eax = -1;
+        return;
+    }
+
+    struct m_file *m_file = malloc(sizeof(struct m_file));
+    if (m_file == NULL)
+    {
+        f->eax = -1;
+        return;
+    }
+
+    int last_id = 0;
+
+    struct list *mapped_list = &thread_current()->mapped_files;
+    if (!list_empty(mapped_list)) {
+        int id = list_entry(list_back(mapped_list),
+                            struct m_file,
+                            list_elem)->id;
+        last_id = id + 1;
+    }
+
+    m_file->id = last_id;
+    m_file->file = reopend_file;
+
+    size_t filesize_bits = file_length(reopend_file) * 8;
+    for(unsigned i = 0; i <= filesize_bits / PGSIZE; i++) {
+        spt_entry_mapped_file((uint32_t) addr + (PGSIZE * i), t->tid, true, reopend_file , (i * PGSIZE) / 8, file_length(reopend_file));
+    }
+
+    list_push_back(&t->mapped_files, &m_file->list_elem);
+
+    f->eax = m_file->id;
+}
+
+//TODO remove entries
+//Impl. flush
+/*
+ * impl. remove_page
+ * impl. remove_page from suplt table.
+ */
+void handler_munmap(struct intr_frame *f){
+    int *stack = f->esp;
+
+    //args
+    int map_id;
+    readu((const void *) (stack + 1), sizeof(map_id), &map_id);
+
+    struct thread *t = thread_current();
+
+    //lock
+    sema_down(&file_sema);
+    struct m_file *m_file = find_mfile(map_id, t);
+
+    if (m_file == 0)
+    {
+        sema_up(&file_sema);
+        return;
+    }
+
+
+    file_close(m_file->file);
+    //remove from list
+    list_remove(&(m_file->list_elem));
+    sema_up(&file_sema);
+
+    //remove from supplemental table
+
+
+    free(m_file);
 }
