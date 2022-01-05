@@ -230,6 +230,11 @@ page_fault (struct intr_frame *f)
     return;
   }
   else {
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
+            fault_addr,
+            not_present ? "not present" : "rights violation",
+            write ? "writing" : "reading",
+            user ? "user" : "kernel");
     // user program caused page fault
     process_terminate(t, -1, t->program_name);
   }
