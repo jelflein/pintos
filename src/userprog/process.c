@@ -151,23 +151,17 @@ process_wait(tid_t tid) {
     sema_down(&t->wait_sema);
   }
 
-  // thread should be gone by now, fetch it again to set it to NULL in this case
-  t = thread_from_tid(tid);
-
-  if (t == NULL) {
-    // thread either doesn't exist or already terminated
-    struct child_result *terminated_child =
-            thread_terminated_child_from_tid(tid, current);
-
-    if (terminated_child != NULL)
-    {
-      list_remove(&terminated_child->elem);
-      int ec = terminated_child->exit_code;
-      free(terminated_child);
-      return ec;
-    }
+  // thread should be gone by now
+  // thread either doesn't exist or already terminated
+  struct child_result *terminated_child =
+          thread_terminated_child_from_tid(tid, current);
+  if (terminated_child != NULL)
+  {
+    list_remove(&terminated_child->elem);
+    int ec = terminated_child->exit_code;
+    free(terminated_child);
+    return ec;
   }
-
   return -1;
 }
 
