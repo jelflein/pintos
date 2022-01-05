@@ -2,12 +2,14 @@
 // Created by pintos on 15.12.21.
 //
 
+#include <userprog/pagedir.h>
 #include "page.h"
 #include "../lib/user/syscall.h"
 #include "../lib/stdio.h"
 #include "../threads/malloc.h"
 #include "../threads/vaddr.h"
-
+#include "frame.h"
+#include <threads/thread.h>
 
 struct hash spt;
 
@@ -123,10 +125,26 @@ struct spt_entry *spt_get_entry(uint32_t vaddr, pid_t pid)
   return hash_entry(elem, struct spt_entry, elem);
 }
 
+void spt_remove_entry(uint32_t vaddr, struct thread *t)
+{
+  struct spt_entry *e = spt_get_entry(vaddr, t->tid);
+  ASSERT(e != NULL);
+
+  if (e->spe_status == frame)
+  {
+    // only need to free a frame if we allocated one.
+    void *paddr = pagedir_get_page(t->pagedir, (void *)vaddr);
+    pagedir_clear_page(t->pagedir, (void *)vaddr);
+    free_frame((void *)paddr);
+  }
+
+  hash_delete(&spt, &e->elem);
+}
+
 bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid) {
     uint32_t file_size_bits = file_size * 8;
 
-    for(int i = 0; i <= (file_size_bits / PGSIZE); i++) {
+    for(unsigned int i = 0; i <= (file_size_bits / PGSIZE); i++) {
         if (spt_get_entry(addr ^ (i * PGSIZE), pid) != NULL) return true;
     }
 

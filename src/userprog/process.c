@@ -22,6 +22,7 @@
 #include "threads/vaddr.h"
 #include "threads/synch.h"
 #include "vm/frame.h"
+#include "syscall.h"
 
 static thread_func start_process NO_RETURN;
 
@@ -190,6 +191,14 @@ process_exit(void) {
   while (!list_empty(&cur->terminated_children)) {
     struct list_elem *e = list_pop_front(&cur->terminated_children);
     struct child_result *entry = list_entry(e, struct child_result, elem);
+    free(entry);
+  }
+
+  //free all mapped files, flush if necessary
+  while (!list_empty(&cur->mapped_files)) {
+    struct list_elem *e = list_pop_front(&cur->mapped_files);
+    struct m_file *entry = list_entry(e, struct m_file, list_elem);
+    close_mfile(cur, entry);
     free(entry);
   }
 

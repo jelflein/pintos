@@ -15,8 +15,9 @@
 #include <string.h>
 #include <vm/page.h>
 #include "vm/frame.h"
+#include "pagedir.h"
 
-#define MIN(a,b)             \
+#define MIN(a, b)             \
 ({                           \
     __typeof__ (a) _a = (a); \
     __typeof__ (b) _b = (b); \
@@ -62,6 +63,8 @@ void handler_mmap(struct intr_frame *);
 void handler_munmap(struct intr_frame *);
 
 static void handler_exit(int *stack);
+
+void close_mfile(struct thread *t, struct m_file *m_file);
 
 struct semaphore file_sema;
 
@@ -138,12 +141,12 @@ syscall_handler(struct intr_frame *f) {
       break;
     }
     case SYS_MMAP: {
-        handler_mmap(f);
-        break;
+      handler_mmap(f);
+      break;
     }
     case SYS_MUNMAP: {
-        handler_munmap(f);
-        break;
+      handler_munmap(f);
+      break;
     }
     default:
       printf("invalid system call!\n");
@@ -201,19 +204,17 @@ put_user(uint8_t *udst, uint8_t byte) {
   return error_code != -1;
 }
 
-static bool try_readu(const void *src, const size_t s, void *dest)
-{
-  for (unsigned i = 0; i < s; i++)
-  {
+static bool try_readu(const void *src, const size_t s, void *dest) {
+  for (unsigned i = 0; i < s; i++) {
     const uint8_t *curent_ptr = ((const uint8_t *) src) + i;
     //check if kernel
-    check_ptr((void *)curent_ptr);
+    check_ptr((void *) curent_ptr);
     int r = get_user(curent_ptr);
     //check if page fault
     if (r == -1)
       return false;
 
-    ((uint8_t *)dest)[i] = (uint8_t)r;
+    ((uint8_t *) dest)[i] = (uint8_t) r;
   }
 
   return true;
@@ -225,24 +226,20 @@ static bool try_readu(const void *src, const size_t s, void *dest)
  * @param s length
  * @param dest kernel src
  */
-static void readu(const void *src, const size_t s, void *dest)
-{
-  if (!try_readu(src, s, dest))
-  {
+static void readu(const void *src, const size_t s, void *dest) {
+  if (!try_readu(src, s, dest)) {
     process_terminate(thread_current(), -1, thread_current()
-                  ->program_name);
+            ->program_name);
   }
 }
 
 
-static bool try_writeu(const void *src, const size_t s, void *dest)
-{
-  for (unsigned i = 0; i < s; i++)
-  {
+static bool try_writeu(const void *src, const size_t s, void *dest) {
+  for (unsigned i = 0; i < s; i++) {
     void *current_ptr = dest + i;
     check_ptr(current_ptr);
 
-    int res = put_user(current_ptr, ((uint8_t *)src)[i]);
+    int res = put_user(current_ptr, ((uint8_t *) src)[i]);
     if (!res)
       return false;
   }
@@ -256,12 +253,10 @@ static bool try_writeu(const void *src, const size_t s, void *dest)
  * @param s 
  * @param dest 
  */
-static void writeu(const void *src, const size_t s, void *dest)
-{
-  if (!try_writeu(src, s, dest))
-  {
+static void writeu(const void *src, const size_t s, void *dest) {
+  if (!try_writeu(src, s, dest)) {
     process_terminate(thread_current(), -1, thread_current()
-              ->program_name);
+            ->program_name);
   }
 }
 
@@ -269,8 +264,7 @@ static void writeu(const void *src, const size_t s, void *dest)
  * compute length of string in user space
  * @param string user src
  */
-static size_t strlenu(const char *string)
-{
+static size_t strlenu(const char *string) {
   const char *p = string;
 
   ASSERT (string != NULL);
@@ -282,8 +276,7 @@ static size_t strlenu(const char *string)
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
-  }
-  while ((char)current_byte != '\0' && p++);
+  } while ((char) current_byte != '\0' && p++);
 
   return p - string;
 }
@@ -308,24 +301,21 @@ void handler_exec(struct intr_frame *f) {
   const char *cmd_line_ptr;
   readu(stack + 1, sizeof cmd_line_ptr, &cmd_line_ptr);
 
-  if (cmd_line_ptr == NULL)
-  {
+  if (cmd_line_ptr == NULL) {
     process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 
-  size_t cmd_length = strlenu((const char *)cmd_line_ptr);
-  if (cmd_length == 0)
-  {
+  size_t cmd_length = strlenu((const char *) cmd_line_ptr);
+  if (cmd_length == 0) {
     process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 
-  char cmd_line[cmd_length+1];
+  char cmd_line[cmd_length + 1];
   readu(cmd_line_ptr, sizeof cmd_line, cmd_line);
 
   // allocate child result early to avoid out-of-memory problems
   struct child_result *cr = malloc(sizeof(struct child_result));
-  if (cr == NULL)
-  {
+  if (cr == NULL) {
     syscall_ret_value(-1, f);
     return;
   }
@@ -353,8 +343,7 @@ void handler_exec(struct intr_frame *f) {
   enum intr_level il = intr_get_level();
   intr_disable();
   child_thread = thread_from_tid(pid);
-  if (child_thread == NULL)
-  {
+  if (child_thread == NULL) {
     // thread already terminated. Look for its data in the parents list
     struct child_result *terminated_child =
             thread_terminated_child_from_tid(pid, thread_current());
@@ -362,13 +351,11 @@ void handler_exec(struct intr_frame *f) {
     ASSERT(terminated_child != NULL);
     syscall_ret_value(terminated_child->has_load_failed ? -1 : pid, f);
 
-    if (terminated_child->has_load_failed)
-    {
+    if (terminated_child->has_load_failed) {
       list_remove(&terminated_child->elem);
       free(terminated_child);
     }
-  }
-  else {
+  } else {
     syscall_ret_value(pid, f);
   }
   intr_set_level(il);
@@ -380,19 +367,17 @@ void handler_fs_create(struct intr_frame *f) {
   const char *file_name_pointer;
   readu(stack + 1, sizeof file_name_pointer, &file_name_pointer);
 
-  if (file_name_pointer == NULL)
-  {
+  if (file_name_pointer == NULL) {
     process_terminate(thread_current(), -1, thread_current()->program_name);
   }
 
   size_t file_name_size = strlenu((const char *) file_name_pointer);
-  if(file_name_size == 0)
-  {
+  if (file_name_size == 0) {
     f->eax = 0;
     return;
   }
   //args
-  char file[file_name_size+1];
+  char file[file_name_size + 1];
   off_t initial_size;
 
   readu(file_name_pointer, sizeof file, file);
@@ -410,20 +395,18 @@ void handler_fs_remove(struct intr_frame *f) {
   const char *file_name_pointer;
   readu(stack + 1, sizeof file_name_pointer, &file_name_pointer);
 
-  if (file_name_pointer == NULL)
-  {
+  if (file_name_pointer == NULL) {
     f->eax = 0;
     return;
   }
 
   size_t file_name_size = strlenu((const char *) file_name_pointer);
-  if(file_name_size == 0)
-  {
+  if (file_name_size == 0) {
     f->eax = 0;
     return;
   }
   //args
-  char file[file_name_size+1];
+  char file[file_name_size + 1];
   readu(file_name_pointer, sizeof file, file);
 
   //lock
@@ -435,17 +418,16 @@ void handler_fs_remove(struct intr_frame *f) {
 static struct file_descriptor *
 find_file_descriptor(int fd, struct thread *thread) {
   struct list_elem *e;
-  ASSERT( thread == thread_current() || intr_get_level() == INTR_OFF);
+  ASSERT(thread == thread_current() || intr_get_level() == INTR_OFF);
 
   for (e = list_begin(&thread->file_descriptors);
-    e != list_end(&thread->file_descriptors);
-    e = list_next(e))
-  {
+       e != list_end(&thread->file_descriptors);
+       e = list_next(e)) {
     struct file_descriptor *entry = list_entry(e,
-                                  struct file_descriptor, list_elem);
+                                               struct file_descriptor,
+                                               list_elem);
 
-    if (entry->descriptor_id == fd)
-    {
+    if (entry->descriptor_id == fd) {
       return entry;
     }
   }
@@ -454,22 +436,20 @@ find_file_descriptor(int fd, struct thread *thread) {
 
 static struct m_file *
 find_mfile(int map_id, struct thread *thread) {
-    struct list_elem *e;
-    ASSERT( thread == thread_current() || intr_get_level() == INTR_OFF);
+  struct list_elem *e;
+  ASSERT(thread == thread_current() || intr_get_level() == INTR_OFF);
 
-    for (e = list_begin(&thread->mapped_files);
-         e != list_end(&thread->mapped_files);
-         e = list_next(e))
-    {
-        struct m_file *entry = list_entry(e,
-                                                   struct m_file, list_elem);
+  for (e = list_begin(&thread->mapped_files);
+       e != list_end(&thread->mapped_files);
+       e = list_next(e)) {
+    struct m_file *entry = list_entry(e,
+                                      struct m_file, list_elem);
 
-        if (entry->id == map_id)
-        {
-            return entry;
-        }
+    if (entry->id == map_id) {
+      return entry;
     }
-    return NULL;
+  }
+  return NULL;
 }
 
 void handler_fs_open(struct intr_frame *f) {
@@ -478,20 +458,18 @@ void handler_fs_open(struct intr_frame *f) {
   const char *file_name_pointer;
   readu(stack + 1, sizeof file_name_pointer, &file_name_pointer);
 
-  if (file_name_pointer == NULL)
-  {
+  if (file_name_pointer == NULL) {
     process_terminate(thread_current(), -1, thread_current()->program_name);
     return;
   }
 
   size_t file_name_size = strlenu((const char *) file_name_pointer);
-  if (file_name_size == 0)
-  {
+  if (file_name_size == 0) {
     f->eax = -1;
     return;
   }
   //args
-  char file[file_name_size+1];
+  char file[file_name_size + 1];
   off_t initial_size;
 
   readu(file_name_pointer, sizeof file, file);
@@ -503,15 +481,13 @@ void handler_fs_open(struct intr_frame *f) {
   sema_up(&file_sema);
 
   //fail open failed
-  if (file_pointer == 0)
-  {
+  if (file_pointer == 0) {
     f->eax = -1;
     return;
   }
 
   struct file_descriptor *fd = malloc(sizeof(struct file_descriptor));
-  if (fd == NULL)
-  {
+  if (fd == NULL) {
     f->eax = -1;
     return;
   }
@@ -522,7 +498,7 @@ void handler_fs_open(struct intr_frame *f) {
   if (!list_empty(fd_list)) {
     int id = list_entry(list_back(fd_list),
                         struct file_descriptor,
-                          list_elem)->descriptor_id;
+                        list_elem)->descriptor_id;
     last_id = id + 1;
   }
 
@@ -551,8 +527,7 @@ void handler_fs_filesize(struct intr_frame *f) {
   sema_down(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
-  if (fd == 0)
-  {
+  if (fd == 0) {
     f->eax = -1;
     sema_up(&file_sema);
     return;
@@ -576,8 +551,7 @@ void handler_fs_read(struct intr_frame *f) {
 
   if (fd_id == 0) { // stdin
     unsigned actual_size = MIN(size, 32u);
-    for (unsigned j = 0; j < actual_size; j++)
-    {
+    for (unsigned j = 0; j < actual_size; j++) {
       unsigned char in = input_getc();
       buffer[j] = in;
     }
@@ -592,26 +566,22 @@ void handler_fs_read(struct intr_frame *f) {
   //lock
   sema_down(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
-  if (fd == NULL)
-  {
+  if (fd == NULL) {
     sema_up(&file_sema);
     f->eax = -1;
     return;
   }
 
   size_t read_so_far = 0;
-  for (;read_so_far < size;)
-  {
+  for (; read_so_far < size;) {
     off_t chunk_size = MIN(sizeof kbuffer, size - read_so_far);
-    chunk_size = file_read(fd->f, kbuffer, (off_t)chunk_size);
+    chunk_size = file_read(fd->f, kbuffer, (off_t) chunk_size);
 
-    if (chunk_size == 0)
-    {
+    if (chunk_size == 0) {
       break;
     }
 
-    if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer))
-    {
+    if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer)) {
       sema_up(&file_sema);
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
@@ -651,29 +621,25 @@ void handler_fs_write(struct intr_frame *f) {
   //lock
   sema_down(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
-  if (fd == NULL)
-  {
+  if (fd == NULL) {
     sema_up(&file_sema);
     f->eax = -1;
     return;
   }
 
   size_t written_so_far = 0;
-  for (;written_so_far < size;)
-  {
+  for (; written_so_far < size;) {
     size_t chunk_size = MIN(sizeof kbuffer, size - written_so_far);
 
-    if (!try_readu(buffer + written_so_far, chunk_size, kbuffer))
-    {
+    if (!try_readu(buffer + written_so_far, chunk_size, kbuffer)) {
       sema_up(&file_sema);
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
 
-    chunk_size = file_write(fd->f, kbuffer, (off_t)chunk_size);
+    chunk_size = file_write(fd->f, kbuffer, (off_t) chunk_size);
 
-    if (chunk_size == 0)
-    {
+    if (chunk_size == 0) {
       break;
     }
 
@@ -707,14 +673,13 @@ void handler_fs_seek(struct intr_frame *f) {
   //lock
   sema_down(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
-  if (fd == NULL)
-  {
+  if (fd == NULL) {
     sema_up(&file_sema);
     return;
   }
 
   struct file *file = fd->f;
-  file->pos = (int)position;
+  file->pos = (int) position;
 
   //unlock
   sema_up(&file_sema);
@@ -757,8 +722,7 @@ void handler_fs_close(struct intr_frame *f) {
   sema_down(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
-  if (fd == 0)
-  {
+  if (fd == 0) {
     sema_up(&file_sema);
     return;
   }
@@ -773,98 +737,96 @@ void handler_fs_close(struct intr_frame *f) {
 }
 
 //TODO sync!
-void handler_mmap(struct intr_frame *f){
-    int *stack = f->esp;
+void handler_mmap(struct intr_frame *f) {
+  int *stack = f->esp;
 
-    //args
-    int fd_id;
-    readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+  //args
+  int fd_id;
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
-    void *addr;
-    readu((const void *) (stack + 2), sizeof(addr), &addr);
+  void *addr;
+  readu((const void *) (stack + 2), sizeof(addr), &addr);
 
-    //Address == 0
-    if (addr == 0 || addr >= PHYS_BASE) {
-        f->eax = -1;
-        return;
-    }
+  //Address == 0
+  if (addr == 0 || addr >= PHYS_BASE) {
+    f->eax = -1;
+    return;
+  }
 
-    //wrong fd_id
-    if (fd_id == 0 || fd_id == 1) {
-        f->eax = -1;
-        return;
-    }
+  //wrong fd_id
+  if (fd_id == 0 || fd_id == 1) {
+    f->eax = -1;
+    return;
+  }
 
-    //not paged alinged
-    if (((uint32_t) addr) % PGSIZE != 0) {
-        f->eax = -1;
-        return;
-    }
+  //not paged alinged
+  if (((uint32_t) addr) % PGSIZE != 0) {
+    f->eax = -1;
+    return;
+  }
 
-    struct thread *t = thread_current();
+  struct thread *t = thread_current();
 
-    //lock
-    sema_down(&file_sema);
-    struct file_descriptor *fd = find_file_descriptor(fd_id, t);
+  //lock
+  sema_down(&file_sema);
+  struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
-    if (fd == 0)
-    {
-        f->eax = -1;
-        sema_up(&file_sema);
-        return;
-    }
-
-    //check is not zero
-    if (file_length(fd->f) == 0) {
-        f->eax = -1;
-        sema_up(&file_sema);
-        return;
-    }
-
-    //check overlaping
-    if (spt_file_overlaping((uint32_t) addr,file_length(fd->f), t->tid)) {
-        f->eax = -1;
-        sema_up(&file_sema);
-        return;
-    }
-
-    struct file *reopend_file = file_reopen(fd->f);
+  if (fd == 0) {
+    f->eax = -1;
     sema_up(&file_sema);
+    return;
+  }
 
-    if (reopend_file == NULL)
-    {
-        f->eax = -1;
-        return;
-    }
+  //check is not zero
+  if (file_length(fd->f) == 0) {
+    f->eax = -1;
+    sema_up(&file_sema);
+    return;
+  }
 
-    struct m_file *m_file = malloc(sizeof(struct m_file));
-    if (m_file == NULL)
-    {
-        f->eax = -1;
-        return;
-    }
+  //check overlaping
+  if (spt_file_overlaping((uint32_t) addr, file_length(fd->f), t->tid)) {
+    f->eax = -1;
+    sema_up(&file_sema);
+    return;
+  }
 
-    int last_id = 0;
+  struct file *reopend_file = file_reopen(fd->f);
+  sema_up(&file_sema);
 
-    struct list *mapped_list = &thread_current()->mapped_files;
-    if (!list_empty(mapped_list)) {
-        int id = list_entry(list_back(mapped_list),
-                            struct m_file,
-                            list_elem)->id;
-        last_id = id + 1;
-    }
+  if (reopend_file == NULL) {
+    f->eax = -1;
+    return;
+  }
 
-    m_file->id = last_id;
-    m_file->file = reopend_file;
+  struct m_file *m_file = malloc(sizeof(struct m_file));
+  if (m_file == NULL) {
+    f->eax = -1;
+    return;
+  }
 
-    size_t filesize_bits = file_length(reopend_file) * 8;
-    for(unsigned i = 0; i <= filesize_bits / PGSIZE; i++) {
-        spt_entry_mapped_file((uint32_t) addr + (PGSIZE * i), t->tid, true, reopend_file , (i * PGSIZE) / 8, file_length(reopend_file));
-    }
+  int last_id = 0;
 
-    list_push_back(&t->mapped_files, &m_file->list_elem);
+  struct list *mapped_list = &thread_current()->mapped_files;
+  if (!list_empty(mapped_list)) {
+    int id = list_entry(list_back(mapped_list),
+                        struct m_file,
+                        list_elem)->id;
+    last_id = id + 1;
+  }
 
-    f->eax = m_file->id;
+  m_file->id = last_id;
+  m_file->file = reopend_file;
+  m_file->vaddr = (uint32_t) addr;
+
+  for (int i = 0; i < file_length(reopend_file); i += PGSIZE) {
+    spt_entry_mapped_file((uint32_t) addr + i, t->tid, true, reopend_file,
+                          i, MIN(file_length(reopend_file) - i, PGSIZE));
+  }
+
+  list_push_back(&t->mapped_files, &m_file->list_elem);
+
+  f->eax = m_file->id;
 }
 
 //TODO remove entries
@@ -873,33 +835,52 @@ void handler_mmap(struct intr_frame *f){
  * impl. remove_page
  * impl. remove_page from suplt table.
  */
-void handler_munmap(struct intr_frame *f){
-    int *stack = f->esp;
+void handler_munmap(struct intr_frame *f) {
+  int *stack = f->esp;
 
-    //args
-    int map_id;
-    readu((const void *) (stack + 1), sizeof(map_id), &map_id);
+  //args
+  int map_id;
+  readu((const void *) (stack + 1), sizeof(map_id), &map_id);
 
-    struct thread *t = thread_current();
+  struct thread *t = thread_current();
 
-    //lock
-    sema_down(&file_sema);
-    struct m_file *m_file = find_mfile(map_id, t);
+  //lock
+  sema_down(&file_sema);
+  struct m_file *m_file = find_mfile(map_id, t);
 
-    if (m_file == 0)
-    {
-        sema_up(&file_sema);
-        return;
+  if (m_file == 0) {
+    sema_up(&file_sema);
+    return;
+  }
+  //remove from supplemental table, page table. Flush if necessary
+  close_mfile(t, m_file);
+
+  list_remove(&(m_file->list_elem));
+  sema_up(&file_sema);
+
+  free(m_file);
+}
+
+void close_mfile(struct thread *t, struct m_file *m_file) {
+  //flush
+  uint32_t vaddr = m_file->vaddr;
+  tid_t pid = t->tid;
+
+  for (int i = 0; i < file_length(m_file->file); i += PGSIZE) {
+    struct spt_entry *entry = spt_get_entry((uint32_t) vaddr + i, pid);
+    if (entry->spe_status == frame) {
+      // page is actually mapped, has been accessed at least once.
+      if (pagedir_is_dirty(t->pagedir, (void *) vaddr)) {
+        // page has been written to
+        file_seek(m_file->file, (int) entry->file_offset);
+        file_write(m_file->file, (void *) vaddr, (int) entry->read_bytes);
+
+        pagedir_set_dirty(t->pagedir, (void *) vaddr, false);
+      }
     }
 
+    spt_remove_entry(vaddr + i, t);
+  }
 
-    file_close(m_file->file);
-    //remove from list
-    list_remove(&(m_file->list_elem));
-    sema_up(&file_sema);
-
-    //remove from supplemental table
-
-
-    free(m_file);
+  file_close(m_file->file);
 }

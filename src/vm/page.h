@@ -16,6 +16,7 @@
 
 
 struct file;
+struct thread;
 
 enum spe_status {
     zeroes,
@@ -47,6 +48,7 @@ struct m_file {
     int id;
     struct list_elem list_elem;
     struct file *file;
+    uint32_t vaddr;
 };
 
 void spt_init(void);
@@ -65,3 +67,5 @@ bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
 struct spt_entry *spt_get_entry(uint32_t vaddr, pid_t pid);
 
 bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid);
+
+void spt_remove_entry(uint32_t vaddr, struct thread *t);
