@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include <vm/page.h>
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -119,6 +120,10 @@ static bool is_thread(struct thread *)UNUSED;
 
     initial_thread->parent = 0;
     initial_thread->exec_file = NULL;
+
+    // too early to allocate memory
+    //spt_init(&initial_thread->spt);
+    initial_thread->is_main_thread = true;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -233,6 +238,9 @@ thread_create(const char *name, int priority, thread_func *function, void *aux) 
     kf->eip = NULL;
     kf->function = function;
     kf->aux = aux;
+
+    spt_init(&t->spt);
+    t->is_main_thread = false;
 
     /* Stack frame for switch_entry(). */
     ef = alloc_frame(t, sizeof *ef);

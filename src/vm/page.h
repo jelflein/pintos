@@ -51,9 +51,10 @@ struct m_file {
     uint32_t vaddr;
 };
 
-void spt_init(void);
+void spt_init(struct hash *spt);
 
-bool spt_entry(uint32_t vaddr, pid_t pid, uint32_t paddr, bool writable, enum
+bool spt_entry(uint32_t vaddr, pid_t pid, uint32_t paddr,
+        bool writable, enum
         spe_status spe_status);
 
 bool spt_entry_empty(uint32_t vaddr, pid_t pid, bool writable, enum spe_status
@@ -69,3 +70,5 @@ struct spt_entry *spt_get_entry(uint32_t vaddr, pid_t pid);
 bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid);
 
 void spt_remove_entry(uint32_t vaddr, struct thread *t);
+
+void spt_destroy(struct hash *);

@@ -101,7 +101,6 @@ kernel_main (void)
   malloc_init ();
   paging_init ();
   frame_table_init(num_user_pages);
-  spt_init();
   /* Segmentation. */
 #ifdef USERPROG
   tss_init ();

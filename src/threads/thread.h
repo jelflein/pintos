@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <hash.h>
 #include "synch.h"
 
 /* States in a thread's life cycle. */
@@ -121,6 +122,8 @@ struct thread
     struct file *exec_file;
     uint8_t *user_esp; /* stack pointer. */
     struct list mapped_files;
+    struct hash spt;
+    bool is_main_thread;
 #endif
 
     /* Owned by thread.c. */

@@ -196,6 +196,11 @@ process_exit(void) {
     free(entry);
   }
 
+  // destroy supplemental page table of process
+  // this also clears the page table, frame table, swap
+  if (!cur->is_main_thread)
+    spt_destroy(&cur->spt);
+
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
