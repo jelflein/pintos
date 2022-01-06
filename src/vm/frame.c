@@ -54,10 +54,9 @@ uint32_t divide_round_up(uint32_t a, uint32_t b)
   return (a + b - 1) / b;
 }
 
-void frame_table_init()
+void frame_table_init(uint32_t num_user_pages)
 {
-  //Too much memory exclud. k_pages
-  num_frames = init_ram_pages;
+  num_frames = num_user_pages;
   uint32_t table_size_bytes = num_frames * 4;
 
   frame_table = palloc_get_multiple(PAL_ZERO | PAL_ASSERT,

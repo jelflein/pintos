@@ -777,15 +777,25 @@ void handler_mmap(struct intr_frame *f) {
     return;
   }
 
+  off_t filesize = file_length(fd->f);
+
   //check is not zero
-  if (file_length(fd->f) == 0) {
+  if (filesize == 0) {
+    f->eax = -1;
+    sema_up(&file_sema);
+    return;
+  }
+
+  //check kernel access
+  if ((uint32_t) addr + (uint32_t) filesize >= (uint32_t)PHYS_BASE)
+  {
     f->eax = -1;
     sema_up(&file_sema);
     return;
   }
 
   //check overlaping
-  if (spt_file_overlaping((uint32_t) addr, file_length(fd->f), t->tid)) {
+  if (spt_file_overlaping((uint32_t) addr, filesize, t->tid)) {
     f->eax = -1;
     sema_up(&file_sema);
     return;

@@ -142,10 +142,8 @@ void spt_remove_entry(uint32_t vaddr, struct thread *t)
 }
 
 bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid) {
-    uint32_t file_size_bits = file_size * 8;
-
-    for(unsigned int i = 0; i <= (file_size_bits / PGSIZE); i++) {
-        if (spt_get_entry(addr ^ (i * PGSIZE), pid) != NULL) return true;
+    for (unsigned int i = 0; i < (uint32_t) file_size; i += PGSIZE) {
+        if (spt_get_entry(addr + i , pid) != NULL) return true;
     }
 
     return false;

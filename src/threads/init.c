@@ -97,10 +97,11 @@ kernel_main (void)
           init_ram_pages * PGSIZE / 1024);
 
   /* Initialize memory system. */
-  palloc_init (user_page_limit);
+  uint32_t num_user_pages = palloc_init (user_page_limit);
   malloc_init ();
   paging_init ();
-
+  frame_table_init(num_user_pages);
+  spt_init();
   /* Segmentation. */
 #ifdef USERPROG
   tss_init ();
@@ -189,8 +190,7 @@ paging_init (void)
      of the Page Directory". */
   asm volatile ("movl %0, %%cr3" : : "r" (vtop (init_page_dir)));
 
-  frame_table_init();
-  spt_init();
+
 }
 
 /* Breaks the kernel command line into words and returns them as
