@@ -194,7 +194,7 @@ page_fault (struct intr_frame *f)
 
   if (spt_entry != NULL) {
     // SPT entry but no mapping in page table exists yet
-    void *frame_pointer = allocate_frame(t, PAL_ZERO);
+    void *frame_pointer = allocate_frame(t, PAL_ZERO, page_vaddr);
 
     //Install page
     bool success = pagedir_set_page(t->pagedir, (void *) page_vaddr,
@@ -206,7 +206,7 @@ page_fault (struct intr_frame *f)
       file_seek(spt_entry->file, (int)spt_entry->file_offset);
       file_read(spt_entry->file, frame_pointer, (int)spt_entry->read_bytes);
 
-      spt_entry->spe_status = frame;
+      spt_entry->spe_status = frame_from_file;
     }
     else if (spt_entry->spe_status == zeroes)
     {

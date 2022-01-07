@@ -20,7 +20,7 @@ struct thread;
 
 enum spe_status {
     zeroes,
-    code_page_thrown_out,
+    frame_from_file,
     swap,
     frame,
     mapped_file
@@ -39,6 +39,8 @@ struct spt_entry {
     size_t  read_bytes;
     size_t  zero_bytes;
 
+    size_t swap_slot;
+
     bool writable;
 
     struct hash_elem elem;
@@ -53,9 +55,9 @@ struct m_file {
 
 void spt_init(struct hash *spt);
 
-bool spt_entry(uint32_t vaddr, pid_t pid, uint32_t paddr,
-        bool writable, enum
-        spe_status spe_status);
+bool spt_entry(struct thread *t, uint32_t vaddr, pid_t pid, uint32_t frame_addr,
+               bool writable, enum
+                       spe_status spe_status);
 
 bool spt_entry_empty(uint32_t vaddr, pid_t pid, bool writable, enum spe_status
 spe_status);

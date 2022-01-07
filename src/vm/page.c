@@ -85,15 +85,14 @@ static struct spt_entry *_spt_entry(struct hash *spt, uint32_t vaddr, pid_t pid,
 bool spt_entry_empty(uint32_t vaddr, pid_t pid, bool
         writable, enum spe_status
         spe_status) {
-  return spt_entry(vaddr, pid, 0, writable, spe_status);
+  return spt_entry(thread_current(), vaddr, pid, 0, writable, spe_status);
 }
 
-bool spt_entry(uint32_t vaddr, pid_t pid, uint32_t
-        frame_addr, bool writable,
-               enum
-spe_status spe_status)
+bool spt_entry(struct thread *t, uint32_t vaddr, pid_t pid, uint32_t frame_addr,
+               bool writable, enum
+                       spe_status spe_status)
 {
-  return _spt_entry(&thread_current()->spt, vaddr, pid, frame_addr, writable,
+  return _spt_entry(&t->spt, vaddr, pid, frame_addr, writable,
                     spe_status) !=
   NULL;
 }

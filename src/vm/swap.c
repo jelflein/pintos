@@ -7,7 +7,7 @@
 #include <devices/block.h>
 #include <threads/vaddr.h>
 
-#define SECTORS_PER_SLOT (BLOCK_SECTOR_SIZE / PGSIZE)
+#define SECTORS_PER_SLOT (PGSIZE / BLOCK_SECTOR_SIZE)
 
 // maybe use bitmap structure to keep track of used and free swap slots
 //true == swap slot occupied
@@ -28,7 +28,7 @@ void set_swap_index(size_t slot, bool value)
   bitmap_set(slots_occupied, slot, value);
 }
 
-int frame_to_swap(void *addr) {
+size_t frame_to_swap(void *addr) {
   size_t free_slot = bitmap_scan(slots_occupied, 0, 1, false);
   if (free_slot == BITMAP_ERROR)
   {

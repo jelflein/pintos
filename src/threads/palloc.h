@@ -12,7 +12,7 @@ enum palloc_flags
     PAL_USER = 004              /* User page. */
   };
 
-uint32_t palloc_init (size_t user_page_limit);
+uint32_t palloc_init(size_t user_page_limit, size_t *total_num_pages);
 void *palloc_get_page (enum palloc_flags);
 void *palloc_get_multiple (enum palloc_flags, size_t page_cnt);
 void palloc_free_page (void *);

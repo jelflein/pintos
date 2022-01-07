@@ -19,7 +19,7 @@
 void
 debug_panic (const char *file, int line, const char *function,
              const char *message, ...)
-{
+ {
   static int level;
   va_list args;
 

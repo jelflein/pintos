@@ -574,7 +574,7 @@ overflow(unsigned int argc, unsigned int size_of_cmd_line, unsigned int align) {
 static bool
 setup_stack(void **esp, const char *arg_line) {
 
-  if (!spt_entry(((uint32_t)PHYS_BASE) - PGSIZE, thread_current()
+  if (!spt_entry(NULL, ((uint32_t) PHYS_BASE) - PGSIZE, thread_current()
                          ->tid, 0, true,
                  zeroes)) {
     return false;

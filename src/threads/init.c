@@ -97,10 +97,11 @@ kernel_main (void)
           init_ram_pages * PGSIZE / 1024);
 
   /* Initialize memory system. */
-  uint32_t num_user_pages = palloc_init (user_page_limit);
+  uint32_t num_total_frames;
+  uint32_t num_user_frames = palloc_init(user_page_limit, &num_total_frames);
   malloc_init ();
   paging_init ();
-  frame_table_init(num_user_pages);
+  frame_table_init(num_user_frames, num_total_frames);
   /* Segmentation. */
 #ifdef USERPROG
   tss_init ();
