@@ -6,6 +6,7 @@
 #include <vm/frame.h>
 #include <threads/palloc.h>
 #include <filesys/file.h>
+#include <vm/swap.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -168,7 +169,7 @@ page_fault (struct intr_frame *f)
   }
 
   uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
-  struct spt_entry *spt_entry = spt_get_entry(page_vaddr, t
+  struct spt_entry *spt_entry = spt_get_entry(thread_current(), page_vaddr, t
           ->tid);
 
   void* stack_pointer = f->esp;
@@ -189,7 +190,7 @@ page_fault (struct intr_frame *f)
     bool success = spt_entry_empty(page_vaddr, t->tid ,true, zeroes);
     if (!success) process_terminate(t, -1, t->program_name);
 
-    spt_entry = spt_get_entry(page_vaddr, t->tid);
+    spt_entry = spt_get_entry(thread_current(), page_vaddr, t->tid);
   }
 
   if (spt_entry != NULL) {
@@ -212,7 +213,15 @@ page_fault (struct intr_frame *f)
     {
       spt_entry->spe_status = frame;
     }
+    else if (spt_entry->spe_status == swap)
+    {
+      // read in from swap
+      swap_to_frame(spt_entry->swap_slot, frame_pointer);
+      spt_entry->swap_slot = 0;
+      spt_entry->spe_status = frame;
+    }
     else {
+      printf("%u\n", spt_entry->spe_status);
       ASSERT(0);
     }
 

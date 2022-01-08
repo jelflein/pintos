@@ -61,4 +61,5 @@ void swap_to_frame(uint32_t slot, void *frame) {
   }
 
   bitmap_set(slots_occupied, slot, false);
+  bitmap_dump(slots_occupied);
 }

@@ -10,6 +10,7 @@
 #include <string.h>
 #include "vm/frame.h"
 #include "vm/page.h"
+#include "vm/swap.h"
 #include "devices/kbd.h"
 #include "devices/input.h"
 #include "devices/serial.h"
@@ -102,6 +103,7 @@ kernel_main (void)
   malloc_init ();
   paging_init ();
   frame_table_init(num_user_frames, num_total_frames);
+
   /* Segmentation. */
 #ifdef USERPROG
   tss_init ();
@@ -129,7 +131,7 @@ kernel_main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
-
+  swap_init();
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */

@@ -9,6 +9,7 @@
 #include "../threads/malloc.h"
 #include "../threads/vaddr.h"
 #include "frame.h"
+#include "swap.h"
 #include <threads/thread.h>
 
 
@@ -118,14 +119,14 @@ bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
 }
 
 
-struct spt_entry *spt_get_entry(uint32_t vaddr, pid_t pid)
+struct spt_entry *spt_get_entry(struct thread *t, uint32_t vaddr, pid_t pid)
 {
   struct spt_entry find_entry = {
       .vaddr = vaddr,
       .pid = pid
   };
 
-  struct hash_elem *elem = hash_find(&thread_current()->spt, &find_entry.elem);
+  struct hash_elem *elem = hash_find(&t->spt, &find_entry.elem);
   if (elem == NULL)
     return NULL;
 
@@ -137,7 +138,7 @@ _spt_remove_entry(uint32_t vaddr, struct thread *t, const struct spt_entry *e);
 
 void spt_remove_entry(uint32_t vaddr, struct thread *t)
 {
-  struct spt_entry *e = spt_get_entry(vaddr, t->tid);
+  struct spt_entry *e = spt_get_entry(thread_current(), vaddr, t->tid);
   ASSERT(e != NULL);
 
   _spt_remove_entry(vaddr, t, e);
@@ -149,7 +150,7 @@ void spt_remove_entry(uint32_t vaddr, struct thread *t)
 
 void
 _spt_remove_entry(uint32_t vaddr, struct thread *t, const struct spt_entry *e) {
-  if (e->spe_status == frame)
+  if (e->spe_status == frame || e->spe_status == frame_from_file)
   {
     // only need to free a frame if we allocated one.
     void *paddr = pagedir_get_page(t->pagedir, (void *)vaddr);
@@ -157,12 +158,14 @@ _spt_remove_entry(uint32_t vaddr, struct thread *t, const struct spt_entry *e) {
     free_frame((void *)paddr);
   } else if (e->spe_status == swap) {
       //remove from swap part.
+    set_swap_index(e->swap_slot, false);
   }
 }
 
 bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid) {
     for (unsigned int i = 0; i < (uint32_t) file_size; i += PGSIZE) {
-        if (spt_get_entry(addr + i , pid) != NULL) return true;
+        if (spt_get_entry(thread_current(), addr + i , pid) != NULL) return
+        true;
     }
 
     return false;
@@ -170,7 +173,7 @@ bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid) {
 
 static void spt_terminate_func(struct hash_elem *elem, void *aux UNUSED)
 {
-    struct spt_entry *entry = hash_entry(elem, struct spt_entry, elem);
+  struct spt_entry *entry = hash_entry(elem, struct spt_entry, elem);
 
     struct thread *t = thread_current();
     _spt_remove_entry(entry->vaddr, t, entry);

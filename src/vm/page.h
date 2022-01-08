@@ -67,7 +67,7 @@ bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
                            size_t file_offset, size_t file_read_size);
 
 
-struct spt_entry *spt_get_entry(uint32_t vaddr, pid_t pid);
+struct spt_entry *spt_get_entry(struct thread *t, uint32_t vaddr, pid_t pid);
 
 bool spt_file_overlaping(uint32_t addr, off_t file_size, pid_t pid);
 

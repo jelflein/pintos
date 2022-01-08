@@ -877,8 +877,10 @@ void close_mfile(struct thread *t, struct m_file *m_file) {
   tid_t pid = t->tid;
 
   for (int i = 0; i < file_length(m_file->file); i += PGSIZE) {
-    struct spt_entry *entry = spt_get_entry((uint32_t) vaddr + i, pid);
-    if (entry->spe_status == frame) {
+    struct spt_entry *entry = spt_get_entry(thread_current(), (uint32_t)
+            vaddr +
+            i, pid);
+    if (entry->spe_status == frame_from_file) {
       // page is actually mapped, has been accessed at least once.
       if (pagedir_is_dirty(t->pagedir, (void *) vaddr)) {
         // page has been written to

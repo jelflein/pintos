@@ -11,8 +11,11 @@
 #include "../threads/interrupt.h"
 #include "swap.h"
 #include "page.h"
+#include "../filesys/file.h"
 
+struct lock lock;
 struct frame_entry *frame_table = NULL;
+
 uint32_t num_frames_available = 0;
 uint32_t num_frames_total = 0;
 
@@ -34,16 +37,17 @@ void *entry_get_page(struct frame_entry entry)
   return (void *)entry.page;
 }
 
+static struct frame_entry get_entry_to_evict();
+
 static struct frame_entry get_entry_to_evict()
 {
   enum intr_level il = intr_disable();
   if (index_of_smallest_score != -1)
   {
-    int32_t ret = index_of_smallest_score;
-    index_of_smallest_score = -1;
     struct frame_entry entry = frame_table[index_of_smallest_score];
     // mark as empty entry
     frame_table[index_of_smallest_score].thread = NULL;
+    index_of_smallest_score = -1;
     intr_set_level(il);
     return entry;
   }
@@ -51,7 +55,7 @@ static struct frame_entry get_entry_to_evict()
 
   int32_t smallest_index = -1;
   uint8_t smallest_score = UINT8_MAX;
-  for (int i = 0; i < num_frames_total; i++)
+  for (uint32_t i = 0; i < num_frames_total; i++)
   {
     struct frame_entry entry = frame_table[i];
     if (!entry_is_empty(entry))
@@ -59,7 +63,7 @@ static struct frame_entry get_entry_to_evict()
       if (entry.eviction_score < smallest_score)
       {
         smallest_score = entry.eviction_score;
-        smallest_index = i;
+        smallest_index = (int32_t)i;
       }
     }
   }
@@ -71,31 +75,50 @@ static struct frame_entry get_entry_to_evict()
 }
 
 
-void *allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
+void *
+allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
 {
+  lock_acquire(&lock);
+  //if swapping
   if (num_frames_available <= 1)
   {
-    printf("OUT OF MEMORY\n");
-
     struct frame_entry fe = get_entry_to_evict();
     struct spt_entry *se = spt_get_entry(fe.thread, fe.page, fe.thread->tid);
-    if (se->writable)
+    ASSERT(se != NULL);
+    if (se->spe_status == frame_from_file)
+    {
+      // write to file, throw out frame
+      // flush to file
+      if (se->writable) {
+        file_seek(se->file, (int) se->file_offset);
+        file_write(se->file, (void *) se->vaddr, (int) se->read_bytes);
+      }
+      void *kernel_addr = (uint32_t)pagedir_get_page(t->pagedir,(void*)se->vaddr);
+
+      pagedir_clear_page(t->pagedir, (void *)se->vaddr);
+      se->spe_status = mapped_file;
+
+
+      free_frame(kernel_addr);
+    }
+    else if (se->writable)
     {
       // write to swap
-      uint32_t swap_id = frame_to_swap(fe.page);
+      uint32_t swap_id = frame_to_swap((void *)fe.page);
       se->swap_slot = swap_id;
       se->spe_status = swap;
+
+      void *kernel_addr = (uint32_t)pagedir_get_page(t->pagedir,(void*)se->vaddr);
+      pagedir_clear_page(t->pagedir, (void *)se->vaddr);
+
+      free_frame(kernel_addr);
     }
     else {
-      // no need to write to swap
-      if (se->spe_status == frame_from_file)
-        se->spe_status = mapped_file;
-      else {
-        ASSERT(0);
-      }
+      ASSERT(0);
     }
   }
 
+  //allocate
   void *u_frame = palloc_get_page(PAL_USER | fgs);
 
   ASSERT(u_frame != NULL)
@@ -104,14 +127,18 @@ void *allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr
 
   ASSERT(ADDR_FROM_TABLE_INDEX(TABLE_INDEX(u_frame)) == u_frame);
 
+  ASSERT(t != NULL);
+
   struct frame_entry e = {
     .page = page_addr,
     .thread = t,
-    .eviction_score = 0
+    .eviction_score = 50,
   };
   frame_table[TABLE_INDEX(u_frame)] = e;
 
   num_frames_available--;
+
+  lock_release(&lock);
 
   return u_frame;
 }
@@ -120,8 +147,8 @@ void free_frame(void *frame)
 {
   struct frame_entry e = {
     .page = 0,
-    .thread = 0,
-    .eviction_score = 50
+    .thread = NULL,
+    .eviction_score = 0,
   };
 
   frame_table[TABLE_INDEX(frame)] = e;
@@ -139,6 +166,8 @@ uint32_t divide_round_up(uint32_t a, uint32_t b)
 
 void frame_table_init(uint32_t num_user_frames, uint32_t num_total_frames)
 {
+  lock_init (&lock);
+
   num_frames_available = num_user_frames;
   num_frames_total = num_total_frames;
   // we only keep track of user frames, but due to our addressing strategy,
@@ -153,14 +182,14 @@ void compute_eviction_score()
 {
   int32_t smallest_index = -1;
   uint8_t smallest_score = UINT8_MAX;
-  for (int i = 0; i < num_frames_total; i++)
+  for (uint32_t i = 0; i < num_frames_total; i++)
   {
     struct frame_entry entry = frame_table[i];
     if (!entry_is_empty(entry))
     {
-      if (pagedir_is_accessed(entry.thread->pagedir, entry.page))
+      if (pagedir_is_accessed(entry.thread->pagedir, (void*)entry.page))
       {
-        pagedir_set_accessed(entry.thread->pagedir, entry.page, false);
+        pagedir_set_accessed(entry.thread->pagedir, (void*)entry.page, false);
         if (entry.eviction_score < UINT8_MAX)
           entry.eviction_score++;
       }
