@@ -26,13 +26,18 @@ int32_t index_of_smallest_score = -1;
 #define ADDR_FROM_TABLE_INDEX(idx) (ptov(idx << 12) + ONE_MB)
 
 
+static void *get_kaddr_for_index(uint32_t idx)
+{
+  return ADDR_FROM_TABLE_INDEX(idx);
+}
+
 void frametable_lock()
 {
-  //lock_acquire(&lock);
+  lock_acquire(&lock);
 }
 void frametable_unlock()
 {
-  //lock_release(&lock);
+  lock_release(&lock);
 }
 
 
@@ -89,45 +94,49 @@ static struct frame_entry get_entry_to_evict(uint32_t *idx)
 void *
 allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
 {
-  //lock_acquire(&lock);
+  lock_acquire(&lock);
   //if swapping
   if (num_frames_available <= 1)
   {
-    uint32_t idx;
-    struct frame_entry fe = get_entry_to_evict(&idx);
-    printf("evicting frame %u (page %p from process \"%s\")\n", idx, (void*)fe
-    .page, fe
-    .thread->name);
+    uint32_t fe_index;
+    struct frame_entry fe = get_entry_to_evict(&fe_index);
+
     ASSERT(fe.thread != NULL);
     struct spt_entry *se = spt_get_entry(fe.thread, fe.page, fe.thread->tid);
     ASSERT(se != NULL);
     uint32_t *pagedir_swapped_process = fe.thread->pagedir;
+
+//    printf("evicting frame %u (page %p from process \"%s\")%p\n", fe_index,
+//           (void*)fe
+//                   .page, fe
+//                   .thread->name,
+//           pagedir_swapped_process);
     if (se->spe_status == frame_from_file)
     {
       // write to file, throw out frame
       // flush to file
+      void *kernel_addr = pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
       if (se->writable) {
         file_seek(se->file, (int) se->file_offset);
-        file_write(se->file, (void *) se->vaddr, (int) se->read_bytes);
+        file_write(se->file, kernel_addr, (int) se->read_bytes);
       }
-      void *kernel_addr = (uint32_t)pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
 
       pagedir_clear_page(pagedir_swapped_process, (void *)se->vaddr);
       se->spe_status = mapped_file;
-
 
       free_frame(kernel_addr);
     }
     else if (se->writable)
     {
-
+      //void *kaddr = get_kaddr_for_index(fe_index);
+      void *kernel_addr = pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
+      //printf("%p\n",kernel_addr);
       // write to swap
-      uint32_t swap_id = frame_to_swap((void *)fe.page);
-      printf("wrote to swap slot %u\n", swap_id);
+      uint32_t swap_id = frame_to_swap(kernel_addr);
+//      printf("wrote to swap slot %u\n", swap_id);
       se->swap_slot = swap_id;
       se->spe_status = swap;
 
-      void *kernel_addr = (uint32_t)pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
       pagedir_clear_page(pagedir_swapped_process, (void *)se->vaddr);
 
       free_frame(kernel_addr);
@@ -159,7 +168,7 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
 
   num_frames_available--;
 
-  //lock_release(&lock);
+  lock_release(&lock);
 
   return u_frame;
 }

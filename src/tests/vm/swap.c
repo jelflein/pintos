@@ -14,7 +14,8 @@
 #define ONE_MB (1024*1024)
 #define TWO_MB (ONE_MB*2)
 
-unsigned char data[ONE_MB/2];
+//unsigned char data[ONE_MB/2 - 27*4096];
+unsigned char data[ONE_MB*2];
 
 /* Initialize buf1 with random data,
    then count the number of instances of each value within it. */

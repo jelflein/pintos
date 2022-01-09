@@ -50,7 +50,7 @@ size_t frame_to_swap(void *addr) {
 
   uint32_t slots = bitmap_count(slots_occupied, 0, bitmap_size(slots_occupied),
                                 false);
-  printf("swap slots left: %u\n", slots);
+  //printf("swap slots left: %u\n", slots);
 
   return free_slot;
 }

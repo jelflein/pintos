@@ -13,7 +13,7 @@ const char *test_name = "swap-child";
 #define ONE_MB (1024*1024)
 #define TWO_MB (ONE_MB*2)
 
-unsigned char data[ONE_MB];
+unsigned char data[TWO_MB];
 
 int
 main (int argc UNUSED, char *argv[])
