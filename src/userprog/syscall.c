@@ -876,6 +876,7 @@ void close_mfile(struct thread *t, struct m_file *m_file) {
   uint32_t vaddr = m_file->vaddr;
   tid_t pid = t->tid;
 
+  frametable_lock();
   for (int i = 0; i < file_length(m_file->file); i += PGSIZE) {
     struct spt_entry *entry = spt_get_entry(thread_current(), (uint32_t)
             vaddr +
@@ -893,6 +894,7 @@ void close_mfile(struct thread *t, struct m_file *m_file) {
 
     spt_remove_entry(vaddr + i, t);
   }
+  frametable_unlock();
 
   file_close(m_file->file);
 }

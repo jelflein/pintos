@@ -21,3 +21,6 @@ void free_frame(void *page);
 void frame_table_init(uint32_t num_user_frames, uint32_t num_total_frames);
 
 void compute_eviction_score(void);
+
+void frametable_lock(void);
+void frametable_unlock(void);

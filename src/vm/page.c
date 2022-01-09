@@ -177,6 +177,7 @@ static void spt_terminate_func(struct hash_elem *elem, void *aux UNUSED)
 
     struct thread *t = thread_current();
     _spt_remove_entry(entry->vaddr, t, entry);
+    // TODO: free() entry
 }
 
 void spt_destroy(struct hash *spt)

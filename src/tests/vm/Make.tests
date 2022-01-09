@@ -1,6 +1,6 @@
 # -*- makefile -*-
 
-tests/vm_TESTS = $(addprefix tests/vm/,pt-grow-stack pt-grow-pusha	\
+tests/vm_TESTS = $(addprefix tests/vm/,swap pt-grow-stack pt-grow-pusha	\
 pt-grow-bad pt-big-stk-obj pt-bad-addr pt-bad-read pt-write-code	\
 pt-write-code2 pt-grow-stk-sc page-linear page-parallel page-merge-seq	\
 page-merge-par page-merge-stk page-merge-mm page-shuffle mmap-read	\
@@ -10,7 +10,7 @@ mmap-null mmap-over-code mmap-over-data mmap-over-stk mmap-remove	\
 mmap-zero)
 
 tests/vm_PROGS = $(tests/vm_TESTS) $(addprefix tests/vm/,child-linear	\
-child-sort child-qsort child-qsort-mm child-mm-wrt child-inherit)
+child-sort child-qsort child-qsort-mm child-mm-wrt child-inherit swap-child)
 
 tests/vm/pt-grow-stack_SRC = tests/vm/pt-grow-stack.c tests/arc4.c	\
 tests/cksum.c tests/lib.c tests/main.c
@@ -68,6 +68,9 @@ tests/vm/child-sort_SRC = tests/vm/child-sort.c tests/lib.c
 tests/vm/child-mm-wrt_SRC = tests/vm/child-mm-wrt.c tests/lib.c tests/main.c
 tests/vm/child-inherit_SRC = tests/vm/child-inherit.c tests/lib.c tests/main.c
 
+tests/vm/swap_SRC = tests/vm/swap.c  tests/lib.c tests/main.c
+tests/vm/swap-child_SRC = tests/vm/swap-child.c tests/lib.c
+
 tests/vm/pt-bad-read_PUTFILES = tests/vm/sample.txt
 tests/vm/pt-write-code2_PUTFILES = tests/vm/sample.txt
 tests/vm/mmap-close_PUTFILES = tests/vm/sample.txt
@@ -78,6 +81,7 @@ tests/vm/mmap-overlap_PUTFILES = tests/vm/zeros
 tests/vm/mmap-exit_PUTFILES = tests/vm/child-mm-wrt
 tests/vm/page-parallel_PUTFILES = tests/vm/child-linear
 tests/vm/page-merge-seq_PUTFILES = tests/vm/child-sort
+tests/vm/swap_PUTFILES = tests/vm/swap-child
 tests/vm/page-merge-par_PUTFILES = tests/vm/child-sort
 tests/vm/page-merge-stk_PUTFILES = tests/vm/child-qsort
 tests/vm/page-merge-mm_PUTFILES = tests/vm/child-qsort-mm

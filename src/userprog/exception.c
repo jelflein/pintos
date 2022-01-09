@@ -169,6 +169,7 @@ page_fault (struct intr_frame *f)
   }
 
   uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
+  frametable_lock();
   struct spt_entry *spt_entry = spt_get_entry(thread_current(), page_vaddr, t
           ->tid);
 
@@ -195,12 +196,15 @@ page_fault (struct intr_frame *f)
 
   if (spt_entry != NULL) {
     // SPT entry but no mapping in page table exists yet
+    frametable_unlock();
     void *frame_pointer = allocate_frame(t, PAL_ZERO, page_vaddr);
+    frametable_lock();
 
     //Install page
     bool success = pagedir_set_page(t->pagedir, (void *) page_vaddr,
                                     frame_pointer,
                                     spt_entry->writable);
+    ASSERT(success);
 
     if (spt_entry->spe_status == mapped_file) {
       // read contents from file into newly allocated frame
@@ -216,17 +220,19 @@ page_fault (struct intr_frame *f)
     else if (spt_entry->spe_status == swap)
     {
       // read in from swap
+      size_t swap_slot = spt_entry->swap_slot;
+      printf("swapping in from slot %u\n", swap_slot);
       swap_to_frame(spt_entry->swap_slot, frame_pointer);
       spt_entry->swap_slot = 0;
       spt_entry->spe_status = frame;
     }
     else {
-      printf("%u\n", spt_entry->spe_status);
+      printf("Tried to read from page %p (process \"%s\")\n", (void*)
+      page_vaddr, t->name);
+      printf("Unhandled spe_status %u\n", spt_entry->spe_status);
       ASSERT(0);
     }
-
-    ASSERT(success);
-
+    frametable_unlock();
     return;
   }
 

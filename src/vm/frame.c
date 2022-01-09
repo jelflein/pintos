@@ -26,6 +26,15 @@ int32_t index_of_smallest_score = -1;
 #define ADDR_FROM_TABLE_INDEX(idx) (ptov(idx << 12) + ONE_MB)
 
 
+void frametable_lock()
+{
+  //lock_acquire(&lock);
+}
+void frametable_unlock()
+{
+  //lock_release(&lock);
+}
+
 
 bool entry_is_empty(struct frame_entry entry)
 {
@@ -37,13 +46,14 @@ void *entry_get_page(struct frame_entry entry)
   return (void *)entry.page;
 }
 
-static struct frame_entry get_entry_to_evict();
+static struct frame_entry get_entry_to_evict(uint32_t *idx);
 
-static struct frame_entry get_entry_to_evict()
+static struct frame_entry get_entry_to_evict(uint32_t *idx)
 {
   enum intr_level il = intr_disable();
   if (index_of_smallest_score != -1)
   {
+    *idx = index_of_smallest_score;
     struct frame_entry entry = frame_table[index_of_smallest_score];
     // mark as empty entry
     frame_table[index_of_smallest_score].thread = NULL;
@@ -70,6 +80,7 @@ static struct frame_entry get_entry_to_evict()
 
   struct frame_entry fe = frame_table[smallest_index];
   frame_table[smallest_index].thread = NULL;
+  *idx = smallest_index;
   intr_set_level(il);
   return fe;
 }
@@ -78,13 +89,19 @@ static struct frame_entry get_entry_to_evict()
 void *
 allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
 {
-  lock_acquire(&lock);
+  //lock_acquire(&lock);
   //if swapping
   if (num_frames_available <= 1)
   {
-    struct frame_entry fe = get_entry_to_evict();
+    uint32_t idx;
+    struct frame_entry fe = get_entry_to_evict(&idx);
+    printf("evicting frame %u (page %p from process \"%s\")\n", idx, (void*)fe
+    .page, fe
+    .thread->name);
+    ASSERT(fe.thread != NULL);
     struct spt_entry *se = spt_get_entry(fe.thread, fe.page, fe.thread->tid);
     ASSERT(se != NULL);
+    uint32_t *pagedir_swapped_process = fe.thread->pagedir;
     if (se->spe_status == frame_from_file)
     {
       // write to file, throw out frame
@@ -93,9 +110,9 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
         file_seek(se->file, (int) se->file_offset);
         file_write(se->file, (void *) se->vaddr, (int) se->read_bytes);
       }
-      void *kernel_addr = (uint32_t)pagedir_get_page(t->pagedir,(void*)se->vaddr);
+      void *kernel_addr = (uint32_t)pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
 
-      pagedir_clear_page(t->pagedir, (void *)se->vaddr);
+      pagedir_clear_page(pagedir_swapped_process, (void *)se->vaddr);
       se->spe_status = mapped_file;
 
 
@@ -103,13 +120,15 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
     }
     else if (se->writable)
     {
+
       // write to swap
       uint32_t swap_id = frame_to_swap((void *)fe.page);
+      printf("wrote to swap slot %u\n", swap_id);
       se->swap_slot = swap_id;
       se->spe_status = swap;
 
-      void *kernel_addr = (uint32_t)pagedir_get_page(t->pagedir,(void*)se->vaddr);
-      pagedir_clear_page(t->pagedir, (void *)se->vaddr);
+      void *kernel_addr = (uint32_t)pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
+      pagedir_clear_page(pagedir_swapped_process, (void *)se->vaddr);
 
       free_frame(kernel_addr);
     }
@@ -125,6 +144,8 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
 
   ASSERT(TABLE_INDEX(u_frame) <= num_frames_total);
 
+  //printf("allocating frame %lu\n", TABLE_INDEX(u_frame));
+
   ASSERT(ADDR_FROM_TABLE_INDEX(TABLE_INDEX(u_frame)) == u_frame);
 
   ASSERT(t != NULL);
@@ -138,7 +159,7 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
 
   num_frames_available--;
 
-  lock_release(&lock);
+  //lock_release(&lock);
 
   return u_frame;
 }

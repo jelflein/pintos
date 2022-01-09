@@ -6,6 +6,7 @@
 #include <lib/kernel/bitmap.h>
 #include <devices/block.h>
 #include <threads/vaddr.h>
+#include <stdio.h>
 
 #define SECTORS_PER_SLOT (PGSIZE / BLOCK_SECTOR_SIZE)
 
@@ -32,6 +33,7 @@ size_t frame_to_swap(void *addr) {
   size_t free_slot = bitmap_scan(slots_occupied, 0, 1, false);
   if (free_slot == BITMAP_ERROR)
   {
+    ASSERT(0);
     // TODO: Handle this error
     return -1;
   }
@@ -45,6 +47,10 @@ size_t frame_to_swap(void *addr) {
   }
 
   bitmap_set(slots_occupied, free_slot, true);
+
+  uint32_t slots = bitmap_count(slots_occupied, 0, bitmap_size(slots_occupied),
+                                false);
+  printf("swap slots left: %u\n", slots);
 
   return free_slot;
 }
@@ -61,5 +67,5 @@ void swap_to_frame(uint32_t slot, void *frame) {
   }
 
   bitmap_set(slots_occupied, slot, false);
-  bitmap_dump(slots_occupied);
+  //bitmap_dump(slots_occupied);
 }
