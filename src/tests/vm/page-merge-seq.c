@@ -4,6 +4,7 @@
    is what it should be. */
 
 #include <syscall.h>
+#include <stdio.h>
 #include "tests/arc4.h"
 #include "tests/lib.h"
 #include "tests/main.h"
@@ -32,6 +33,8 @@ init (void)
   arc4_crypt (&arc4, buf1, sizeof buf1);
   for (i = 0; i < sizeof buf1; i++)
     histogram[buf1[i]]++;
+
+  printf("buf2=%p\n",&buf2[0]);
 }
 
 /* Sort each chunk of buf1 using a subprocess. */
@@ -110,7 +113,7 @@ verify (void)
   size_t buf_idx;
   size_t hist_idx;
 
-  msg ("verify");
+  msg ("!verify");
 
   buf_idx = 0;
   for (hist_idx = 0; hist_idx < sizeof histogram / sizeof *histogram;
@@ -119,7 +122,10 @@ verify (void)
       while (histogram[hist_idx]-- > 0) 
         {
           if (buf2[buf_idx] != hist_idx)
-            fail ("bad value %d in byte %zu", buf2[buf_idx], buf_idx);
+          {
+            printf("!!!!bad address %p\n", &buf2[buf_idx]);
+            fail("bad value %d in byte %zu", buf2[buf_idx], buf_idx);
+          }
           buf_idx++;
         } 
     }

@@ -23,7 +23,8 @@ enum spe_status {
     frame_from_file,
     swap,
     frame,
-    mapped_file
+    mapped_file,
+    mapped_file_nowriteback
 };
 
 struct spt_entry {
@@ -64,7 +65,7 @@ spe_status);
 
 bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
                            bool writable, struct file *mapped_f,
-                           size_t file_offset, size_t file_read_size);
+                           size_t file_offset, size_t file_read_size, bool write_back_to_file);
 
 
 struct spt_entry *spt_get_entry(struct thread *t, uint32_t vaddr, pid_t pid);

@@ -101,12 +101,13 @@ bool spt_entry(struct thread *t, uint32_t vaddr, pid_t pid, uint32_t frame_addr,
 
 bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
                            bool writable, struct file *mapped_f,
-                           size_t file_offset, size_t file_read_size)
+                           size_t file_offset, size_t file_read_size,
+                           bool write_back_to_file)
 {
   struct spt_entry *entry = _spt_entry(&thread_current()->spt, vaddr,
           pid, 0,
           writable,
-          mapped_file);
+          write_back_to_file ? mapped_file : mapped_file_nowriteback);
 
   if (entry == NULL)
     return false;

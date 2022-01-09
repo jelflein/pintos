@@ -106,11 +106,11 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
     ASSERT(se != NULL);
     uint32_t *pagedir_swapped_process = fe.thread->pagedir;
 
-//    printf("evicting frame %u (page %p from process \"%s\")%p\n", fe_index,
-//           (void*)fe
-//                   .page, fe
-//                   .thread->name,
-//           pagedir_swapped_process);
+    printf("evicting frame %u (page %p from process \"%s\")%p\n", fe_index,
+           (void*)fe
+                   .page, fe
+                   .thread->name,
+           pagedir_swapped_process);
     if (se->spe_status == frame_from_file)
     {
       // write to file, throw out frame
@@ -128,12 +128,10 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
     }
     else if (se->writable)
     {
-      //void *kaddr = get_kaddr_for_index(fe_index);
       void *kernel_addr = pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
-      //printf("%p\n",kernel_addr);
       // write to swap
       uint32_t swap_id = frame_to_swap(kernel_addr);
-//      printf("wrote to swap slot %u\n", swap_id);
+      printf("wrote to swap slot %u\n", swap_id);
       se->swap_slot = swap_id;
       se->spe_status = swap;
 
@@ -207,6 +205,7 @@ void frame_table_init(uint32_t num_user_frames, uint32_t num_total_frames)
   frame_table = palloc_get_multiple(PAL_ZERO | PAL_ASSERT,
                                     divide_round_up(table_size_bytes, PGSIZE));
 }
+
 
 void compute_eviction_score()
 {

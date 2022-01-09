@@ -507,8 +507,10 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
     }
     else {
       /* Add the page to the process's address space. */
+
       if (!spt_entry_mapped_file((uint32_t)upage, thread_current()->tid, writable,
-                                 file, file_offset, page_read_bytes)) {
+                                 file, file_offset, page_read_bytes,
+                                 !writable)) {
         return false;
       }
       file_offset += (int)page_read_bytes;

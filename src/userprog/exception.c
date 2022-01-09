@@ -208,33 +208,38 @@ page_fault (struct intr_frame *f)
     ASSERT(success);
 
 
-    if (spt_entry->spe_status == mapped_file) {
+    if (spt_entry->spe_status == mapped_file || spt_entry->spe_status == mapped_file_nowriteback) {
       // read contents from file into newly allocated frame
       file_seek(spt_entry->file, (int)spt_entry->file_offset);
       // this may block and run another thread in the meantime
       file_read(spt_entry->file, frame_pointer, (int)spt_entry->read_bytes);
 
-      spt_entry->spe_status = frame_from_file;
+      spt_entry->spe_status = spt_entry->spe_status ==
+              mapped_file_nowriteback ? frame : frame_from_file;
+      printf("mapping in from file to user vaddr %p of process "
+             "\"%s\"\n", (void*)page_vaddr, t->name);
     }
     else if (spt_entry->spe_status == zeroes)
     {
+      printf("mapped zero page at vaddr %p of process "
+             "\"%s\"\n", (void*)page_vaddr, t->name);
       spt_entry->spe_status = frame;
     }
     else if (spt_entry->spe_status == swap)
     {
       // read in from swap
       size_t swap_slot = spt_entry->swap_slot;
-      //printf("swapping in from slot %u to user vaddr %p of process "
-      //       "\"%s\"\n",
-      //       swap_slot, (void*)page_vaddr, t->name);
+      printf("swapping in from slot %u to user vaddr %p of process "
+             "\"%s\"\n",
+             swap_slot, (void*)page_vaddr, t->name);
       swap_to_frame(spt_entry->swap_slot, frame_pointer);
       spt_entry->swap_slot = 0;
       spt_entry->spe_status = frame;
     }
     else {
-      //printf("Tried to read from page %p (process \"%s\") %p\n", (void*)
-      //page_vaddr, t->name, t->pagedir);
-      //printf("Unhandled spe_status %u\n", spt_entry->spe_status);
+      printf("Tried to read from page %p (process \"%s\") %p\n", (void*)
+      page_vaddr, t->name, t->pagedir);
+      printf("Unhandled spe_status %u\n", spt_entry->spe_status);
       ASSERT(0);
     }
     frametable_unlock();
