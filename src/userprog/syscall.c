@@ -583,7 +583,7 @@ void handler_fs_read(struct intr_frame *f) {
       break;
     }
 
-    if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer)) {
+    if (!try_writeu(kbuffer, chunk_size, buffer + read_so_far)) {
       lock_release(&file_sema);
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
