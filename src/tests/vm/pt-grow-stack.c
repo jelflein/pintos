@@ -8,12 +8,12 @@
 #include "tests/main.h"
 
 
-uint32_t sum(uint32_t n)
-{
-  if (n == 1)
-    return 1;
-  return n + sum(n - 1);
-}
+//uint32_t sum(uint32_t n)
+//{
+//  if (n == 1)
+//    return 1;
+//  return n + sum(n - 1);
+//}
 
 void
 test_main (void)
@@ -26,5 +26,5 @@ test_main (void)
   arc4_crypt (&arc4, stack_obj, sizeof stack_obj);
   msg ("cksum: %lu", cksum (stack_obj, sizeof stack_obj));
 
-  sum(18000);
+//  sum(18000);
 }

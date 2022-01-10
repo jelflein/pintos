@@ -140,6 +140,7 @@ void do_swapping() {
   ASSERT(fe.thread != NULL);
   struct spt_entry *se = spt_get_entry(fe.thread, fe.page, fe.thread->tid);
   ASSERT(se != NULL);
+
   uint32_t *pagedir_swapped_process = fe.thread->pagedir;
 
 //    printf("evicting frame %u (page %p from process \"%s\")%p\n", fe_index,
@@ -149,30 +150,29 @@ void do_swapping() {
     // write to file, throw out frame
     // flush to file
     void *kernel_addr = pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
+    pagedir_clear_page(pagedir_swapped_process, (void *)se->vaddr);
+    se->spe_status = mapped_file;
     if (se->writable)
     {
+      //TODO
       //fs_lock();
       file_seek(se->file, (int) se->file_offset);
       file_write(se->file, kernel_addr, (int) se->read_bytes);
       //fs_unlock();
     }
 
-    pagedir_clear_page(pagedir_swapped_process, (void *)se->vaddr);
-    se->spe_status = mapped_file;
 
     free_frame(kernel_addr);
   }
   else if (se->writable && se->spe_status == frame)
   {
-    void *kernel_addr = pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
     // write to swap
-    uint32_t swap_id = frame_to_swap(kernel_addr);
-//    printf("wrote to swap slot %u\n", swap_id);
-    se->swap_slot = swap_id;
-    se->spe_status = swap;
-
+    void *kernel_addr = pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
     pagedir_clear_page(pagedir_swapped_process, (void *)se->vaddr);
-
+    se->spe_status = swap;
+    uint32_t swap_id = frame_to_swap(kernel_addr);
+    se->swap_slot = swap_id;
+//    printf("wrote to swap slot %u\n", swap_id);
     free_frame(kernel_addr);
   }
   else {

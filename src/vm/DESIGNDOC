@@ -254,9 +254,16 @@ to swap it out. This is just one example.
 >> the page during the eviction process?  How do you avoid a race
 >> between P evicting Q's frame and Q faulting the page back in?
 
-//TODO
+The first case is handled in frame.c:148-177
+We first remove the page table entry of the swapped-out page from the affected
+thread before we start the blocking swap-out IO operation. This way a
+read from the affected process to that page while it is being swapped out
+would cause a page fault. The page fault handler acquires a lock and has
+to wait until the other thread is done swapping out the page. Only then may
+it start swapping in the page again. The same also holds for frames which
+are not swapped out (read-only code pages).
 
-The second case is covered by our monitor lock of the swapping code
+The second case is also covered by our monitor lock of the swapping code
 (swap in and out use the same lock).
 
 >> B7: Suppose a page fault in process P causes a page to be read from
@@ -264,11 +271,22 @@ The second case is covered by our monitor lock of the swapping code
 >> cannot interfere by e.g. attempting to evict the frame while it is
 >> still being read in?
 
+Same answer as above: Our code that handles swapping in and swapping out
+of frames / pages uses a monitor lock. There can only ever be one process
+swapping a page in our out at the same time.
+
 >> B8: Explain how you handle access to paged-out pages that occur
 >> during system calls.  Do you use page faults to bring in pages (as
 >> in user programs), or do you have a mechanism for "locking" frames
 >> into physical memory, or do you use some other design?  How do you
 >> gracefully handle attempted accesses to invalid virtual addresses?
+
+We use page faults even in system calls. So a system call like read()
+might be interrupted and has to wait until the destination buffer is
+swapped in. During this time another thread may be run by pintos.
+We have synchronized the read() syscall with the "filesystem-lock"
+so that a reentrant call of read() would have to wait for the interrupted
+invocation to finish.
 
 ---- RATIONALE ----
 
@@ -278,6 +296,12 @@ The second case is covered by our monitor lock of the swapping code
 >> possibility for deadlock but allows for high parallelism.  Explain
 >> where your design falls along this continuum and why you chose to
 >> design it this way.
+
+We use as few locks as possible in our implementation. This is mainly
+to make the locking code more simple and avoid pitfalls. This does limit
+multitasking performance in certain cases. More fine-grained locking
+would increase complexity but allow more simultaneous swapping, lazy code
+loading and syscalls.
 
 			 MEMORY MAPPED FILES
 			 ===================
