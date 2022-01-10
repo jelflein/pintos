@@ -32,7 +32,6 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 struct thread {
     …
     uint8_t *user_esp; The user stackpointer, this is requeired for a syscall.
-    struct list mapped_files; A list of "m_files"
     struct hash spt; The supllemntalpagetable
     …
 }
@@ -64,12 +63,6 @@ struct spt_entry {
     uint32_t vaddr;
     pid_t pid;
 
-    If a mapped file, then this is the file on file system.
-    struct file *file;
-
-    The file_offset for seek
-    size_t file_offset;
-
     The "size" of the page max. 4096 aka PGSIZE
     size_t  read_bytes;
 
@@ -82,28 +75,6 @@ struct spt_entry {
     For the hash table.
     struct hash_elem elem;
 };
-
-This is the struct for a mapped file (in the tread struct).
-struct m_file {
-    An id
-    int id;
-
-    struct list_elem list_elem;
-
-    The file system file.
-    struct file *file;
-
-    Start address of the mapped file.
-    uint32_t vaddr;
-};
-
-in swap.c
-
-A bitmap to mangae the swaping slots.
-struct bitmap *slots_occupied;
-
-The swaping device / partition.
-struct block *device;
 
 in frame.c
 
@@ -132,6 +103,7 @@ The reverse function.
 >> if any, that contains the data of a given page.
 
 if a page fault occurs, then we will lookup the fault address in the spt (supplemental page table).
+If the spt entry has the status "frame", then we do a loop up in the frame table.
 
 The frame table is an array and the index of the frame entry is a shifted address
 with a magic number.
@@ -140,15 +112,29 @@ with a magic number.
 >> kernel and user virtual addresses that alias a single frame, or
 >> alternatively how do you avoid the issue?
 
+We use only the accessed bit. In intervals, we check whether the accessed bits is 1.
+If it is, we adjust the relevance of the page for our eviction score algorithm and reset the bit to 0.
+We check the accessed bits of both the kernel virtual address and the user address.
+
+pagedir_is_accessed(entry.thread->pagedir, kernel_addr)
+|| pagedir_is_accessed(entry.thread->pagedir, v_addr)
+
 ---- SYNCHRONIZATION ----
 
 >> A4: When two user processes both need a new frame at the same time,
 >> how are races avoided?
 
+We use in frame.c a lock. It is designed as "monitor lock" in the method:
+allocate_frame. This method allocates and manages the frame table (therefore frame table is thread safe)
+Therefore whichever thread comes later will have to wait until the earlier thread
+is done allocating a frame (possibly swapping out another frame).
+
 ---- RATIONALE ----
 
 >> A5: Why did you choose the data structure(s) that you did for
 >> representing virtual-to-physical mappings?
+
+
 
 		       PAGING TO AND FROM DISK
 		       =======================
@@ -159,18 +145,94 @@ with a magic number.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+in swap.c
+
+A bitmap to mangae the swaping slots.
+struct bitmap *slots_occupied;
+
+The swaping device / partition.
+struct block *device;
+
+enum spe_status {
+    …
+    swap
+    …
+};
+
+struct spt_entry {
+    …
+    enum spe_status spe_status;
+
+    The swapslot is the slot on the block device.
+    size_t swap_slot;
+    …
+};
+
+struct frame_entry {
+    …
+    uint8_t eviction_score; A score for the evicition policy.
+    …
+};
+
+in frame.c
+
+int32_t index_of_smallest_score = -1;
+
 ---- ALGORITHMS ----
 
 >> B2: When a frame is required but none is free, some frame must be
 >> evicted.  Describe your code for choosing a frame to evict.
 
+We use a timer interrupt (every 100 ticks) to calculate a score. If
+accessed or dirty we increase the score or decrease. Every new entry
+starts with 50, because the probability of using is high. During
+the calculation we save the frame with the index of smallest score
+in a variable (its very fast to compute). If more as one frame
+is required. It search the whole list. During this (get_entry_to_evict)
+we disabled the interrupts, because of side effect (same data structure etc.).
+
 >> B3: When a process P obtains a frame that was previously used by a
 >> process Q, how do you adjust the page table (and any other data
 >> structures) to reflect the frame Q no longer has?
 
+We do not have any "free command" (also no malloc) in pintos for the user process.
+Therefore we focus on 1) process exit and 2) swapping and mmap
+1)
+In process_exit (process.c) we clear every frame table entry,
+spt-entry or page dir entry correctly. We deallocate every page.
+The frame table does not contains any page of process Q
+after process_exit. Because we deallocate the page and we allocate
+the new page with PAL_ZERO flag in P no previous data is inside (potential security risk).
+We also clear every pd entry.
+2)
+As for swapping and mmap, assuming both processes are still alive:
+When a frame is swapped out to the swap device or munmap'ed, we change the SPT entry to a status "swap"
+or flush out the data to the file and remove the SPT entry completely.
+Further we remove the vaddr -> paddr mapping from Q's page table.
+The entry in the frame table is completely removed.
+When P obtains that same frame again, a new frame table entry (at the same location) will
+be created and a new pagedir entry will be added in P's page table.
+
 >> B4: Explain your heuristic for deciding whether a page fault for an
 >> invalid virtual address should cause the stack to be extended into
 >> the page that faulted.
+
+First of all, the fault address has to be in the user address space for obvious reasons.
+    security check
+    fault_addr < PHYS_BASE &&
+
+Secondly, the fault address should be at an address higher than or equal to the stack address.
+Then the address is by definition part of the stack.
+    fault inside stack
+    (fault_addr >= stack_pointer ||
+
+And finally, there is one exception: Some x86 instructions may legitimately access memory slightly
+above (lower addresses) the stack pointer (because they atomically grow the stack and write to it in one instruction).
+These are namingly PUSH, CALL and PUSHA. They access up to 32 bytes " above"  the stack pointer.
+fault is max. 32 byte under the SP
+    ((stack_pointer > fault_addr)  && (stack_pointer - fault_addr <= 32)))
+
+We enforce a limit of 192 pages for the stack. It can be adjusted in the source code of exception.c
 
 ---- SYNCHRONIZATION ----
 
@@ -178,11 +240,24 @@ with a magic number.
 >> particular, explain how it prevents deadlock.  (Refer to the
 >> textbook for an explanation of the necessary conditions for
 >> deadlock.)
+We use a monitor lock on some methods as mentioned in earlier questions.
+We carefully designed the system and ordered the locking code so that
+no deadlock can happen. The interplay between filesystem locking and
+page table locking required extra considerations, especially regarding mmap.
+
+When we swap out a frame, no page fault will be triggered when accessing that frame.
+If the frame was not physically present yet, it would make no sense to attempt
+to swap it out. This is just one example.
 
 >> B6: A page fault in process P can cause another process Q's frame
 >> to be evicted.  How do you ensure that Q cannot access or modify
 >> the page during the eviction process?  How do you avoid a race
 >> between P evicting Q's frame and Q faulting the page back in?
+
+//TODO
+
+The second case is covered by our monitor lock of the swapping code
+(swap in and out use the same lock).
 
 >> B7: Suppose a page fault in process P causes a page to be read from
 >> the file system or swap.  How do you ensure that a second process Q
@@ -213,14 +288,61 @@ with a magic number.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+This is the struct for a mapped file (in the tread struct).
+struct m_file {
+    An id
+    int id;
+
+    struct list_elem list_elem;
+
+    The file system file.
+    struct file *file;
+
+    Start address of the mapped file.
+    uint32_t vaddr;
+};
+
+struct spt_entry {
+    …
+    enum spe_status spe_status;
+
+    If a mapped file, then this is the file on file system.
+    struct file *file;
+
+    The file_offset for seek
+    size_t file_offset;
+    …
+};
+
+struct thread {
+    …
+    struct list mapped_files; A list of "m_files"
+    …
+}
+
 ---- ALGORITHMS ----
 
 >> C2: Describe how memory mapped files integrate into your virtual
 >> memory subsystem.  Explain how the page fault and eviction
 >> processes differ between swap pages and other pages.
 
+We use the spt for this. If you
+
 >> C3: Explain how you determine whether a new file mapping overlaps
 >> any existing segment.
+
+The supplemental page table is a hash map. The key is the page address.
+The function "spt_file_overlaping" (page.c) needs also the size of
+the file.
+
+With the size of the file, we can can compute how many pages we will need
+and their address. We can use a simple for loop:
+
+for (unsigned int i = 0; i < file_size; i += PGSIZE)
+…
+
+We can iterate over the hash map with "start address" + i, if we their an entry,
+then it overlapping.
 
 ---- RATIONALE ----
 
