@@ -139,22 +139,30 @@ _spt_remove_entry(uint32_t vaddr, struct thread *t, const struct spt_entry *e);
 
 void spt_remove_entry(uint32_t vaddr, struct thread *t)
 {
-  struct spt_entry *e = spt_get_entry(thread_current(), vaddr, t->tid);
+  struct spt_entry *e = spt_get_entry(t, vaddr, t->tid);
   ASSERT(e != NULL);
 
   _spt_remove_entry(vaddr, t, e);
 
-  hash_delete(&thread_current()->spt, &e->elem);
+  struct hash_elem *elem = hash_delete(&t->spt, &e->elem);
+  ASSERT(elem != NULL);
 
   free(e);
 }
 
 void
 _spt_remove_entry(uint32_t vaddr, struct thread *t, const struct spt_entry *e) {
+  // zeroes,
+  //    frame_from_file,
+  //    swap,
+  //    frame,
+  //    mapped_file,
+  //    mapped_file_nowriteback
   if (e->spe_status == frame || e->spe_status == frame_from_file)
   {
     // only need to free a frame if we allocated one.
     void *paddr = pagedir_get_page(t->pagedir, (void *)vaddr);
+    ASSERT(paddr != NULL);
     pagedir_clear_page(t->pagedir, (void *)vaddr);
     free_frame((void *)paddr);
   } else if (e->spe_status == swap) {
@@ -178,7 +186,7 @@ static void spt_terminate_func(struct hash_elem *elem, void *aux UNUSED)
 
     struct thread *t = thread_current();
     _spt_remove_entry(entry->vaddr, t, entry);
-    // TODO: free() entry
+    free(entry);
 }
 
 void spt_destroy(struct hash *spt)

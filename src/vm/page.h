@@ -38,7 +38,6 @@ struct spt_entry {
     size_t file_offset;
 
     size_t  read_bytes;
-    size_t  zero_bytes;
 
     size_t swap_slot;
 

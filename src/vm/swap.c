@@ -33,6 +33,7 @@ size_t frame_to_swap(void *addr) {
   size_t free_slot = bitmap_scan(slots_occupied, 0, 1, false);
   if (free_slot == BITMAP_ERROR)
   {
+    // out of swap space
     ASSERT(0);
     // TODO: Handle this error
     return -1;

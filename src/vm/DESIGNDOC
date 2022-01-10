@@ -8,8 +8,8 @@
 
 >> Fill in the names, email addresses and matriculation numbers of your group members.
 
-FirstName LastName <email@domain.example> 9999999
-FirstName LastName <email@domain.example> 9999999
+Jonas Elflein <jonase@coli.uni-saarland.de> 7003378
+Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 
 ---- PRELIMINARIES ----
 
@@ -29,10 +29,112 @@ FirstName LastName <email@domain.example> 9999999
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct thread {
+    …
+    uint8_t *user_esp; The user stackpointer, this is requeired for a syscall.
+    struct list mapped_files; A list of "m_files"
+    struct hash spt; The supllemntalpagetable
+    …
+}
+
+This is a entry for the frametable (an array).
+
+struct frame_entry {
+    uint32_t page;
+    struct thread *thread;
+
+    uint8_t eviction_score; A score for the evicition policy.
+};
+
+The status for the spt.
+
+enum spe_status {
+    zeroes,
+    frame_from_file,
+    swap,
+    frame,
+    mapped_file,
+    mapped_file_nowriteback
+};
+
+struct spt_entry {
+    enum spe_status spe_status;
+
+    Page address
+    uint32_t vaddr;
+    pid_t pid;
+
+    If a mapped file, then this is the file on file system.
+    struct file *file;
+
+    The file_offset for seek
+    size_t file_offset;
+
+    The "size" of the page max. 4096 aka PGSIZE
+    size_t  read_bytes;
+
+    The swapslot is the slot on the block device.
+    size_t swap_slot;
+
+    If the page wirtable.
+    bool writable;
+
+    For the hash table.
+    struct hash_elem elem;
+};
+
+This is the struct for a mapped file (in the tread struct).
+struct m_file {
+    An id
+    int id;
+
+    struct list_elem list_elem;
+
+    The file system file.
+    struct file *file;
+
+    Start address of the mapped file.
+    uint32_t vaddr;
+};
+
+in swap.c
+
+A bitmap to mangae the swaping slots.
+struct bitmap *slots_occupied;
+
+The swaping device / partition.
+struct block *device;
+
+in frame.c
+
+The lock for the frame table.
+struct lock lock;
+
+The frame table as arrays of structs.
+struct frame_entry *frame_table;
+
+uint32_t num_frames_available = 0;
+uint32_t num_frames_total = 0;
+
+The index of the page with the smallest eviciton score (next page to evict).
+int32_t index_of_smallest_score = -1;
+
+#define ONE_MB (1024*1024)
+
+A macro for the frame table. It compute the index with th address.
+#define TABLE_INDEX(addr) (vtop(addr - ONE_MB) >> 12)
+The reverse function.
+#define ADDR_FROM_TABLE_INDEX(idx) (ptov(idx << 12) + ONE_MB)
+
 ---- ALGORITHMS ----
 
 >> A2: In a few paragraphs, describe your code for locating the frame,
 >> if any, that contains the data of a given page.
+
+if a page fault occurs, then we will lookup the fault address in the spt (supplemental page table).
+
+The frame table is an array and the index of the frame entry is a shifted address
+with a magic number.
 
 >> A3: How does your code coordinate accessed and dirty bits between
 >> kernel and user virtual addresses that alias a single frame, or

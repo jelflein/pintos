@@ -64,13 +64,15 @@ void handler_munmap(struct intr_frame *);
 
 static void handler_exit(int *stack);
 
+void unsync_close_mfile(struct thread *t, struct m_file *m_file);
+
 void close_mfile(struct thread *t, struct m_file *m_file);
 
-struct semaphore file_sema;
+struct lock file_sema;
 
 void
 syscall_init(void) {
-  sema_init(&file_sema, 1);
+  lock_init(&file_sema);
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -320,11 +322,11 @@ void handler_exec(struct intr_frame *f) {
     return;
   }
 
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   tid_t pid = process_execute(cmd_line);
 
   if (pid == -1) {
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     syscall_ret_value(-1, f);
     return;
   }
@@ -337,7 +339,7 @@ void handler_exec(struct intr_frame *f) {
   struct thread *child_thread = thread_from_tid(pid);
   //sema sleep until loaded
   sema_down(&child_thread->process_load_sema);
-  sema_up(&file_sema);
+  lock_release(&file_sema);
   //check if thread failed
   // the thread might be gone by now
   enum intr_level il = intr_get_level();
@@ -384,9 +386,9 @@ void handler_fs_create(struct intr_frame *f) {
   readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   f->eax = filesys_create(file, initial_size);
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 }
 
 void handler_fs_remove(struct intr_frame *f) {
@@ -410,9 +412,9 @@ void handler_fs_remove(struct intr_frame *f) {
   readu(file_name_pointer, sizeof file, file);
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   f->eax = filesys_remove(file);
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 }
 
 static struct file_descriptor *
@@ -476,9 +478,9 @@ void handler_fs_open(struct intr_frame *f) {
   readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file *file_pointer = filesys_open(file);
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 
   //fail open failed
   if (file_pointer == 0) {
@@ -524,17 +526,17 @@ void handler_fs_filesize(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
   if (fd == 0) {
     f->eax = -1;
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
 
   f->eax = file_length(fd->f);
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 }
 
 void handler_fs_read(struct intr_frame *f) {
@@ -564,10 +566,10 @@ void handler_fs_read(struct intr_frame *f) {
   struct thread *cur = thread_current();
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
   if (fd == NULL) {
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     f->eax = -1;
     return;
   }
@@ -582,7 +584,7 @@ void handler_fs_read(struct intr_frame *f) {
     }
 
     if (!try_writeu(kbuffer + read_so_far, chunk_size, buffer)) {
-      sema_up(&file_sema);
+      lock_release(&file_sema);
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
@@ -593,7 +595,7 @@ void handler_fs_read(struct intr_frame *f) {
   f->eax = read_so_far;
 
   //unlock
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 }
 
 void handler_fs_write(struct intr_frame *f) {
@@ -619,10 +621,10 @@ void handler_fs_write(struct intr_frame *f) {
   struct thread *cur = thread_current();
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
   if (fd == NULL) {
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     f->eax = -1;
     return;
   }
@@ -632,7 +634,7 @@ void handler_fs_write(struct intr_frame *f) {
     size_t chunk_size = MIN(sizeof kbuffer, size - written_so_far);
 
     if (!try_readu(buffer + written_so_far, chunk_size, kbuffer)) {
-      sema_up(&file_sema);
+      lock_release(&file_sema);
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
@@ -649,7 +651,7 @@ void handler_fs_write(struct intr_frame *f) {
   f->eax = written_so_far;
 
   //unlock
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 }
 
 /*
@@ -671,10 +673,10 @@ void handler_fs_seek(struct intr_frame *f) {
   readu((const void *) (stack + 2), sizeof(position), &position);
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
   if (fd == NULL) {
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
 
@@ -682,7 +684,7 @@ void handler_fs_seek(struct intr_frame *f) {
   file->pos = (int) position;
 
   //unlock
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 }
 
 /*
@@ -697,9 +699,9 @@ void handler_fs_tell(struct intr_frame *f) {
 
   readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 
   if (fd == NULL) {
     f->eax = 0;
@@ -719,11 +721,11 @@ void handler_fs_close(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
   if (fd == 0) {
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
 
@@ -731,7 +733,7 @@ void handler_fs_close(struct intr_frame *f) {
   file_close(fd->f);
   //remove from list
   list_remove(&(fd->list_elem));
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 
   free(fd);
 }
@@ -768,12 +770,12 @@ void handler_mmap(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
   if (fd == 0) {
     f->eax = -1;
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
 
@@ -782,7 +784,7 @@ void handler_mmap(struct intr_frame *f) {
   //check is not zero
   if (filesize == 0) {
     f->eax = -1;
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
 
@@ -790,19 +792,19 @@ void handler_mmap(struct intr_frame *f) {
   if ((uint32_t) addr + (uint32_t) filesize >= (uint32_t)PHYS_BASE)
   {
     f->eax = -1;
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
 
   //check overlaping
   if (spt_file_overlaping((uint32_t) addr, filesize, t->tid)) {
     f->eax = -1;
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
 
   struct file *reopend_file = file_reopen(fd->f);
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 
   if (reopend_file == NULL) {
     f->eax = -1;
@@ -855,46 +857,78 @@ void handler_munmap(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  sema_down(&file_sema);
+  lock_acquire(&file_sema);
   struct m_file *m_file = find_mfile(map_id, t);
 
   if (m_file == 0) {
-    sema_up(&file_sema);
+    lock_release(&file_sema);
     return;
   }
   //remove from supplemental table, page table. Flush if necessary
-  close_mfile(t, m_file);
+  unsync_close_mfile(t, m_file);
 
   list_remove(&(m_file->list_elem));
-  sema_up(&file_sema);
+  lock_release(&file_sema);
 
   free(m_file);
 }
 
-void close_mfile(struct thread *t, struct m_file *m_file) {
+void unsync_close_mfile(struct thread *t, struct m_file *m_file) {
   //flush
-  uint32_t vaddr = m_file->vaddr;
+  uint32_t mapped_file_vaddr = m_file->vaddr;
   tid_t pid = t->tid;
 
   frametable_lock();
   for (int i = 0; i < file_length(m_file->file); i += PGSIZE) {
     struct spt_entry *entry = spt_get_entry(thread_current(), (uint32_t)
-            vaddr +
-            i, pid);
+                                                                      mapped_file_vaddr +
+                                                              i, pid);
+    ASSERT(entry != NULL);
     if (entry->spe_status == frame_from_file) {
       // page is actually mapped, has been accessed at least once.
-      if (pagedir_is_dirty(t->pagedir, (void *) vaddr)) {
+      void *page_vaddr = (void *) mapped_file_vaddr + i;
+      void *kaddr = pagedir_get_page(t->pagedir, page_vaddr);
+      if (pagedir_is_dirty(t->pagedir, page_vaddr)) {
         // page has been written to
         file_seek(m_file->file, (int) entry->file_offset);
-        file_write(m_file->file, (void *) vaddr, (int) entry->read_bytes);
 
-        pagedir_set_dirty(t->pagedir, (void *) vaddr, false);
+        void *kaddr2 = pagedir_get_page(t->pagedir, (void*)page_vaddr);
+        file_write(m_file->file, (void *) kaddr, (int) entry->read_bytes);
+
+        pagedir_set_dirty(t->pagedir, page_vaddr, false);
       }
     }
-
-    spt_remove_entry(vaddr + i, t);
+    else if (entry->spe_status == mapped_file){
+      // all good, no need to write back
+    }
+    else {
+      ASSERT(0);
+    }
+    spt_remove_entry(mapped_file_vaddr + i, t);
   }
   frametable_unlock();
 
   file_close(m_file->file);
+}
+
+void fs_lock()
+{
+  if(!lock_held_by_current_thread(&file_sema))
+  {
+    lock_acquire(&file_sema);
+  }
+}
+
+void fs_unlock()
+{
+  if(lock_held_by_current_thread(&file_sema))
+  {
+    lock_release(&file_sema);
+  }
+}
+
+void close_mfile(struct thread *t, struct m_file *m_file) {
+  lock_acquire(&file_sema);
+  unsync_close_mfile(t, m_file);
+  lock_release(&file_sema);
 }

@@ -14,10 +14,14 @@
 #define ONE_MB (1024*1024)
 #define TWO_MB (ONE_MB*2)
 
+
+#define CHUNK_SIZE (126 * 512)
+#define CHUNK_CNT 16                            /* Number of chunks. */
+#define DATA_SIZE (CHUNK_CNT * CHUNK_SIZE)      /* Buffer size. */
 //unsigned char data[ONE_MB/2 - 27*4096];
 //unsigned char data[ONE_MB];
-unsigned char data[ONE_MB*2];
-unsigned char data2[ONE_MB*2];
+unsigned char data[DATA_SIZE];
+unsigned char data2[DATA_SIZE];
 
 /* Initialize buf1 with random data,
    then count the number of instances of each value within it. */
@@ -42,12 +46,12 @@ verify (void)
 {
   for (uint32_t i = 0; i < sizeof data; i++)
   {
-    if (data[i] != 42)
+    if (data[i] != (i / CHUNK_SIZE) + 1)
     {
       printf("data reading from address %p\n", &data[i]);
       fail ("bad value %d in byte %zu", data[i], i);
     }
-    if (data2[i] != 40)
+    if (data2[i] != (i / CHUNK_SIZE) + 1 - 2)
     {
       printf("data2 reading from address %p\n", &data[i]);
       fail ("bad value %d in byte %zu", data[i], i);
@@ -56,31 +60,44 @@ verify (void)
   msg ("success, checked until=%'zu", sizeof data);
 }
 
+void launch_children()
+{
+  size_t i;
+
+  create ("buffer", CHUNK_SIZE);
+  for (i = 0; i < CHUNK_CNT; i++)
+  {
+    pid_t child;
+    int handle;
+
+    msg ("sort chunk %zu", i);
+
+    /* Write this chunk to a file. */
+    CHECK ((handle = open ("buffer")) > 1, "open \"buffer\"");
+    write (handle, data + CHUNK_SIZE * i, CHUNK_SIZE);
+    close (handle);
+
+    /* Sort with subprocess. */
+    char invocation[30];
+    snprintf(invocation, sizeof invocation, "swap-child-f %lu", i+1);
+    CHECK ((child = exec (invocation)) != -1, "asdfasdfasdfadsf");
+    CHECK (wait (child) == 123, "wait for swap-child-f");
+
+    /* Read chunk back from file. */
+    CHECK ((handle = open ("buffer")) > 1, "open \"buffer\"");
+    read (handle, data + CHUNK_SIZE * i, CHUNK_SIZE);
+    close (handle);
+  }
+}
+
 void
 test_main (void)
 {
   init ();
-  pid_t child1;
-  pid_t child2;
-  pid_t child3;
-  pid_t child4;
-  pid_t child5;
-  CHECK ((child1 = exec ("swap-child")) != -1,
-         "exec \"swap-child\" 1");
-  CHECK ((child2 = exec ("swap-child")) != -1,
-         "exec \"swap-child\" 2");
-  CHECK ((child3 = exec ("swap-child")) != -1,
-         "exec \"swap-child\" 3");
-  CHECK ((child4 = exec ("swap-child")) != -1,
-         "exec \"swap-child\" 4");
-  CHECK (wait (child2) == 22, "wait for swap-child 2");
+
+  launch_children();
+
   copy();
-  CHECK ((child5 = exec ("swap-child")) != -1,
-         "exec \"swap-child\" 5");
-  CHECK (wait (child1) == 22, "wait for swap-child 1");
-  CHECK (wait (child3) == 22, "wait for swap-child 3");
-  CHECK (wait (child5) == 22, "wait for swap-child 5");
-  CHECK (wait (child4) == 22, "wait for swap-child 4");
 
   verify ();
 }
