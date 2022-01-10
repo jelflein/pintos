@@ -179,13 +179,22 @@ page_fault (struct intr_frame *f)
   // TODO: Implement stack size limit
   if (spt_entry == NULL
     && (
-      // PUSH, CALL or PUSH instruction may fault 4 or 32 bytes above the stack
+      // PUSH, CALL or PUSHA instruction may fault 4 or 32 bytes above the stack
       ((stack_pointer > fault_addr) && ((uint32_t)stack_pointer - (uint32_t)fault_addr <= 32))
       // faults inside the stack
       || fault_addr > stack_pointer
       )
     && fault_addr < PHYS_BASE)
   {
+    uint32_t stack_start = ((uint32_t) PHYS_BASE) - PGSIZE;
+    uint32_t stack_page_number = (stack_start - page_vaddr) /
+            (uint32_t) PGSIZE;
+    const uint32_t STACK_PAGE_LIMIT = 192;
+    if (stack_page_number > STACK_PAGE_LIMIT)
+    {
+      printf("Stack overflow, limit of %u pages enforced\n", STACK_PAGE_LIMIT);
+      process_terminate(t, -1, t->program_name);
+    }
     // grow stack logic
     //create spt entry
     bool success = spt_entry_empty(page_vaddr, t->tid ,true, zeroes);
@@ -195,7 +204,6 @@ page_fault (struct intr_frame *f)
   }
 
   if (spt_entry != NULL) {
-//    ASSERT(spt_entry->spe_status != frame);
     // SPT entry but no mapping in page table exists yet
     frametable_unlock();
     void *frame_pointer = allocate_frame(t, PAL_ZERO, page_vaddr);
@@ -239,9 +247,9 @@ page_fault (struct intr_frame *f)
       spt_entry->spe_status = frame;
     }
     else {
-//      printf("Tried to read from page %p (process \"%s\") %p\n", (void*)
-//      page_vaddr, t->name, t->pagedir);
-//      printf("Unhandled spe_status %u\n", spt_entry->spe_status);
+      printf("Tried to read from page %p (process \"%s\") %p\n", (void*)
+      page_vaddr, t->name, t->pagedir);
+      printf("Unhandled spe_status %u\n", spt_entry->spe_status);
       ASSERT(0);
     }
     frametable_unlock();

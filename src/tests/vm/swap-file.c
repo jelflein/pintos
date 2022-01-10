@@ -10,13 +10,14 @@
 #include "tests/main.h"
 #include "../lib.h"
 #include "../../lib/stdio.h"
+#include "../../lib/user/syscall.h"
 
 #define ONE_MB (1024*1024)
 #define TWO_MB (ONE_MB*2)
 
 
-#define CHUNK_SIZE (126 * 512)
-#define CHUNK_CNT 16                            /* Number of chunks. */
+#define CHUNK_SIZE (17 * 512)
+#define CHUNK_CNT 1                            /* Number of chunks. */
 #define DATA_SIZE (CHUNK_CNT * CHUNK_SIZE)      /* Buffer size. */
 //unsigned char data[ONE_MB/2 - 27*4096];
 //unsigned char data[ONE_MB];
@@ -30,7 +31,19 @@ init (void)
 {
   msg ("init");
 
+  printf("&data= %p\n",data);
+  printf("&data2= %p\n",data2);
+  printf("sizeof data= %u\n",sizeof data);
+
   memset(data, 42, sizeof data);
+  for (uint32_t i = 0; i < sizeof data; i++)
+  {
+    if (data[i] != 42)
+    {
+      printf("data reading from address %p\n", &data[i]);
+      fail ("bad value %d in byte %zu", data[i], i);
+    }
+  }
 }
 
 static void copy(void)
@@ -74,13 +87,32 @@ void launch_children()
 
     /* Write this chunk to a file. */
     CHECK ((handle = open ("buffer")) > 1, "open \"buffer\"");
-    write (handle, data + CHUNK_SIZE * i, CHUNK_SIZE);
+    printf("Parent seek to address %p\n", i * CHUNK_SIZE);
+    seek(handle, i * CHUNK_SIZE);
+    uint32_t written = write (handle, data + CHUNK_SIZE * i, CHUNK_SIZE);
+    //CHECK(written == )
     close (handle);
+
+    // SANITY CHECKS
+    CHECK ((handle = open ("buffer")) > 1, "reopen \"buffer\"");
+    printf("Parent seek to address %p\n", i * CHUNK_SIZE);
+    seek(handle, i * CHUNK_SIZE);
+    read(handle, data2 + CHUNK_SIZE * i, CHUNK_SIZE);
+    close (handle);
+    for (uint32_t j = 0; j < sizeof data2; j++)
+    {
+      if (data2[j] != 42)
+      {
+        printf("data reading from address %p\n", &data2[j]);
+        fail ("bad value %d in byte %zu", data2[j], i);
+      }
+    }
+
 
     /* Sort with subprocess. */
     char invocation[30];
     snprintf(invocation, sizeof invocation, "swap-child-f %lu", i+1);
-    CHECK ((child = exec (invocation)) != -1, "asdfasdfasdfadsf");
+    CHECK ((child = exec (invocation)) != -1, invocation);
     CHECK (wait (child) == 123, "wait for swap-child-f");
 
     /* Read chunk back from file. */

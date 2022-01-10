@@ -87,7 +87,7 @@ static struct frame_entry get_entry_to_evict(uint32_t *idx)
 
   struct frame_entry fe = frame_table[smallest_index];
   frame_table[smallest_index].thread = NULL;
-  frame_table[smallest_index].page = NULL;
+  frame_table[smallest_index].page = 0;
   frame_table[smallest_index].eviction_score = 0;
   *idx = smallest_index;
   intr_set_level(il);
@@ -111,7 +111,7 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
 
   ASSERT(TABLE_INDEX(u_frame) <= num_frames_total);
 
-//  printf("allocating frame %lu\n", TABLE_INDEX(u_frame));
+//  printf("allocating frame %u\n", TABLE_INDEX(u_frame));
 
   ASSERT(ADDR_FROM_TABLE_INDEX(TABLE_INDEX(u_frame)) == u_frame);
 
@@ -167,7 +167,7 @@ void do_swapping() {
     void *kernel_addr = pagedir_get_page(pagedir_swapped_process, (void*)se->vaddr);
     // write to swap
     uint32_t swap_id = frame_to_swap(kernel_addr);
-//      printf("wrote to swap slot %u\n", swap_id);
+//    printf("wrote to swap slot %u\n", swap_id);
     se->swap_slot = swap_id;
     se->spe_status = swap;
 
@@ -226,15 +226,13 @@ void compute_eviction_score()
     if (!entry_is_empty(entry))
     {
       void *kernel_addr = ADDR_FROM_TABLE_INDEX(i);
-      if (pagedir_is_accessed(entry.thread->pagedir, (void*)entry.page))
+      // check user address and kernel address
+      if (pagedir_is_accessed(entry.thread->pagedir, (void*)entry.page)
+      ||  pagedir_is_accessed(entry.thread->pagedir, kernel_addr))
       {
         pagedir_set_accessed(entry.thread->pagedir, (void*)entry.page, false);
-        if (entry.eviction_score < UINT8_MAX)
-          entry.eviction_score++;
-      }
-      else if (pagedir_is_accessed(entry.thread->pagedir, kernel_addr))
-      {
         pagedir_set_accessed(entry.thread->pagedir, kernel_addr, false);
+
         if (entry.eviction_score < UINT8_MAX)
           entry.eviction_score++;
       }
@@ -248,7 +246,7 @@ void compute_eviction_score()
       if (entry.eviction_score < smallest_score)
       {
         smallest_score = entry.eviction_score;
-        smallest_index = i;
+        smallest_index = (int32_t)i;
       }
     }
   }

@@ -7,6 +7,14 @@
 #include "tests/lib.h"
 #include "tests/main.h"
 
+
+uint32_t sum(uint32_t n)
+{
+  if (n == 1)
+    return 1;
+  return n + sum(n - 1);
+}
+
 void
 test_main (void)
 {
@@ -17,4 +25,6 @@ test_main (void)
   memset (stack_obj, 0, sizeof stack_obj);
   arc4_crypt (&arc4, stack_obj, sizeof stack_obj);
   msg ("cksum: %lu", cksum (stack_obj, sizeof stack_obj));
+
+  sum(18000);
 }

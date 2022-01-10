@@ -34,7 +34,6 @@ init (void)
   for (i = 0; i < sizeof buf1; i++)
     histogram[buf1[i]]++;
 
-  printf("buf2=%p\n",&buf2[0]);
 }
 
 /* Sort each chunk of buf1 using a subprocess. */
@@ -113,7 +112,7 @@ verify (void)
   size_t buf_idx;
   size_t hist_idx;
 
-  msg ("!verify");
+  msg ("verify");
 
   buf_idx = 0;
   for (hist_idx = 0; hist_idx < sizeof histogram / sizeof *histogram;
