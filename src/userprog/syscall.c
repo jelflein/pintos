@@ -519,8 +519,6 @@ void handler_fs_open(struct intr_frame *f) {
   f->eax = fd->descriptor_id;
 }
 
-static uint8_t kbuffer[8192];
-
 void handler_fs_filesize(struct intr_frame *f) {
   int *stack = f->esp;
 
@@ -582,15 +580,15 @@ void handler_fs_read(struct intr_frame *f) {
 
   size_t read_so_far = 0;
   for (; read_so_far < size;) {
-    off_t chunk_size = MIN(sizeof kbuffer, size - read_so_far);
-    chunk_size = file_read(fd->f, kbuffer, (off_t) chunk_size);
+    off_t chunk_size = MIN((size_t)PGSIZE, size - read_so_far);
+    chunk_size = file_read(fd->f, cur->syscall_temp_buffer, (off_t) chunk_size);
 
     if (chunk_size == 0) {
       break;
     }
 
     lock_release(&file_sema);
-    if (!try_writeu(kbuffer, chunk_size, buffer + read_so_far)) {
+    if (!try_writeu(cur->syscall_temp_buffer, chunk_size, buffer + read_so_far)) {
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
@@ -638,16 +636,16 @@ void handler_fs_write(struct intr_frame *f) {
 
   size_t written_so_far = 0;
   for (; written_so_far < size;) {
-    size_t chunk_size = MIN(sizeof kbuffer, size - written_so_far);
+    size_t chunk_size = MIN((size_t)PGSIZE, size - written_so_far);
 
     lock_release(&file_sema);
-    if (!try_readu(buffer + written_so_far, chunk_size, kbuffer)) {
+    if (!try_readu(buffer + written_so_far, chunk_size, cur->syscall_temp_buffer)) {
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
     lock_acquire(&file_sema);
 
-    chunk_size = file_write(fd->f, kbuffer, (off_t) chunk_size);
+    chunk_size = file_write(fd->f, cur->syscall_temp_buffer, (off_t) chunk_size);
 
     if (chunk_size == 0) {
       break;

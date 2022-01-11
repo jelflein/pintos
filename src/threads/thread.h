@@ -124,6 +124,7 @@ struct thread
     struct list mapped_files;
     struct hash spt;
     bool is_main_thread;
+    void *syscall_temp_buffer;
 #endif
 
     /* Owned by thread.c. */

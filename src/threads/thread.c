@@ -124,6 +124,7 @@ static bool is_thread(struct thread *)UNUSED;
     // too early to allocate memory
     //spt_init(&initial_thread->spt);
     initial_thread->is_main_thread = true;
+    initial_thread->syscall_temp_buffer = NULL;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -241,6 +242,10 @@ thread_create(const char *name, int priority, thread_func *function, void *aux) 
 
     spt_init(&t->spt);
     t->is_main_thread = false;
+
+    t->syscall_temp_buffer = palloc_get_page(0);
+    if (t->syscall_temp_buffer == NULL)
+      return TID_ERROR;
 
     /* Stack frame for switch_entry(). */
     ef = alloc_frame(t, sizeof *ef);
