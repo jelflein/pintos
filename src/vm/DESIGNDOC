@@ -32,7 +32,7 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 struct thread {
     …
     uint8_t *user_esp; The user stackpointer, this is required for a syscall (growing the stack).
-    struct hash spt; The supllemntalpagetable
+    struct hash spt; The supplemental page table
     …
 }
 
@@ -41,8 +41,7 @@ This is a entry for the frametable (an array).
 struct frame_entry {
     uint32_t page;
     struct thread *thread;
-
-    uint8_t eviction_score; A score for the evicition policy.
+    uint8_t eviction_score; A score for the eviction policy.
 };
 
 The status for the spt.
@@ -57,10 +56,9 @@ enum spe_status {
 };
 
 struct spt_entry {
-    enum spe_status spe_status;
+    enum spe_status spe_status; // spt entry
 
-    Page address
-    uint32_t vaddr;
+    uint32_t vaddr; // Page address
     pid_t pid;
 
     The "size" of the page max. 4096 aka PGSIZE
@@ -81,13 +79,15 @@ in frame.c
 The lock for the frame table.
 struct lock lock;
 
-The frame table as arrays of structs.
+The frame table as arrays of structs. Array index is (function of) physical frame address
 struct frame_entry *frame_table;
 
+The number of frames available right now
 uint32_t num_frames_available = 0;
+Total number of frames
 uint32_t num_frames_total = 0;
 
-The index of the page with the smallest eviciton score (next page to evict).
+The index of the page with the smallest eviction score (next page to evict).
 int32_t index_of_smallest_score = -1;
 
 #define ONE_MB (1024*1024)
@@ -143,11 +143,19 @@ is done allocating a frame (possibly swapping out another frame).
 >> representing virtual-to-physical mappings?
 
 We choose an array of struct for the frame table, because the access is very fast.
-We use as index a shifted address.
+We use (a function of) the physical address for the array index.
+The array size fits one entry for every palloc page there can be,
+which is determined by the RAM size and the palloc code.
 
-For the spt we choose an
+For the SPT we choose a hash map. That is because a hash map has a very fast lookup time.
+While an array is arguably even faster for lookups, the keys of the SPT entries
+(the virtual addresses) are not "dense", a process usually has a huge virtual address space
+but almost all addresses are not mapped.
+That is to say there would be many empty slots in a huge array. The hash map does
+not suffer from this problem of wasted space with sparse keys.
 
-
+There is one SPT per process. But just one Frame Table for the whole OS, because the physical
+memory is shared between all processes.
 
 		       PAGING TO AND FROM DISK
 		       =======================
@@ -160,10 +168,10 @@ For the spt we choose an
 
 in swap.c
 
-A bitmap to mangae the swaping slots.
+A bitmap to managing the swap slots.
 struct bitmap *slots_occupied;
 
-The swaping device / partition.
+The swapping device / partition.
 struct block *device;
 
 enum spe_status {
@@ -184,11 +192,22 @@ struct spt_entry {
 struct frame_entry {
     …
     uint8_t eviction_score; A score for the evicition policy.
+    bool pinned; A bool indicating this frame may not be swapped out
     …
 };
 
+struct thread {
+    …
+    void *syscall_temp_buffer;
+    …
+}
+
 in frame.c
 
+A cached index of the frame with the lowest eviction system score.
+Calculated on every run of the eviction algorithm "for free".
+We use this if it is available, otherwise calculate the 
+to-be-swapped-out entry on demand.
 int32_t index_of_smallest_score = -1;
 
 ---- ALGORITHMS ----
@@ -196,19 +215,21 @@ int32_t index_of_smallest_score = -1;
 >> B2: When a frame is required but none is free, some frame must be
 >> evicted.  Describe your code for choosing a frame to evict.
 
-We use a timer interrupt (every 100 ticks) to calculate a score. If
-accessed or dirty we increase the score or decrease. Every new entry
-starts with 50, because the probability of using is high. During
+We use the system timer interrupt (every 100 ticks) to calculate a score
+ for every frame. If a frame has been
+accessed, we increase the score. Otherwise we decrease it. We avoid over- and underflows. Every new entry
+starts with 50, because the probability of using it is high. During
 the calculation we save the frame with the index of smallest score
-in a variable (its very fast to compute). If more as one frame
-is required. It search the whole list. During this (get_entry_to_evict)
-we disabled the interrupts, because of side effect (same data structure etc.).
+in a variable (it's basically for free,  we have to iterate over all used frames anyway). If more than one frame
+is required between two timer interrupts, we search the frame array and find the frame with the lowest score again. During this (get_entry_to_evict)
+we disabled the interrupts, because of side effects (same data structure used in timer interrupt).
+We exclude pinned frames from the eviction. Pinned frames may not be swapped out. This mechanism is used to avoid having to lock the page table and the file system at the same time.
 
 >> B3: When a process P obtains a frame that was previously used by a
 >> process Q, how do you adjust the page table (and any other data
 >> structures) to reflect the frame Q no longer has?
 
-We do not have any "free command" (also no malloc) in pintos for the user process.
+We do not have any "free command" as in dynamic memory (also no malloc) in pintos for the user process.
 Therefore we focus on 1) process exit and 2) swapping and mmap
 1)
 In process_exit (process.c) we clear every frame table entry,
@@ -247,6 +268,9 @@ fault is max. 32 byte under the SP
 
 We enforce a limit of 192 pages for the stack. It can be adjusted in the source code of exception.c
 
+We attach the user stack pointer to the thread struct during a system call.
+This is used to access the user stack pointer even if the page fault is caused inside syscall kernel code.
+
 ---- SYNCHRONIZATION ----
 
 >> B5: Explain the basics of your VM synchronization design.  In
@@ -261,6 +285,10 @@ page table locking required extra considerations, especially regarding mmap.
 When we swap out a frame, no page fault will be triggered when accessing that frame.
 If the frame was not physically present yet, it would make no sense to attempt
 to swap it out. This is just one example.
+
+One more example is munmap. We modify the SPT and page directory and also write out data from memory to the mapped file in the file system. Because acquiring both the file system lock and the page table lock would provoke a deadlock, we instead used fine-grained locking and introduced a system to pin a page frame in the frame table. This way we lock the page table and mark the frame as pinned. Then we unlock the frame table and lock the file system. Then we can write the frame to the file system and don't have to worry about the frame being evicted. Afterwards we unlock the file system, lock the page table again and remove the SPT entry and page dir entry and physical frame. Then we unlock the page table lock. 
+
+We also introduced fine-grained locking (file lock for the syscall) in the read() and write() syscall handlers. Because of this, those syscalls can now be executed concurrently / reentrant. Therefore we cannot use same global data buffer for all syscalls anymore. We introduced a pre-thread buffer called syscall_temp_buffer in the thread structure. 
 
 >> B6: A page fault in process P can cause another process Q's frame
 >> to be evicted.  How do you ensure that Q cannot access or modify
@@ -286,7 +314,7 @@ The second case is also covered by our monitor lock of the swapping code
 
 Same answer as above: Our code that handles swapping in and swapping out
 of frames / pages uses a monitor lock. There can only ever be one process
-swapping a page in our out at the same time.
+swapping a page in or out at the same time.
 
 >> B8: Explain how you handle access to paged-out pages that occur
 >> during system calls.  Do you use page faults to bring in pages (as
@@ -296,10 +324,10 @@ swapping a page in our out at the same time.
 
 We use page faults even in system calls. So a system call like read()
 might be interrupted and has to wait until the destination buffer is
-swapped in. During this time another thread may be run by pintos.
-We have synchronized the read() syscall with the "filesystem-lock"
-so that a reentrant call of read() would have to wait for the interrupted
-invocation to finish.
+swapped in. To prevent deadlocks, we introduced fine-grained locking in 
+read and write syscalls. These syscalls make sure not possess the file system lock
+while potentially causing a page fault. If this was the case, a deadlock might occur. 
+During this time another thread may be run by pintos.
 
 ---- RATIONALE ----
 
@@ -310,11 +338,12 @@ invocation to finish.
 >> where your design falls along this continuum and why you chose to
 >> design it this way.
 
-We use as few locks as possible in our implementation. This is mainly
-to make the locking code more simple and avoid pitfalls. This does limit
-multitasking performance in certain cases. More fine-grained locking
-would increase complexity but allow more simultaneous swapping, lazy code
-loading and syscalls.
+We only have a few locks in our implementation. This is mainly
+to make the locking code more simple and avoid pitfalls.  This does limit
+multitasking performance in certain cases. 
+However, in a couple of places we also use fine-grained locking. Avoiding deadlocks
+during nested page faults and syscalls and swapping is tricky and requires much consideration. Using more locks would increase code complexity but allow more simultaneous swapping, lazy code loading and syscalls.
+A good example for this is the buffer problem from B5.
 
 			 MEMORY MAPPED FILES
 			 ===================
@@ -337,6 +366,15 @@ struct m_file {
 
     Start address of the mapped file.
     uint32_t vaddr;
+};
+
+enum spe_status {
+    zeroes,
+    frame_from_file,
+    swap,
+    frame,
+    mapped_file, <- mapped file frame
+    mapped_file_nowriteback,<- mapped file, but modifiable and never written back to file
 };
 
 struct spt_entry {
@@ -363,7 +401,13 @@ struct thread {
 >> memory subsystem.  Explain how the page fault and eviction
 >> processes differ between swap pages and other pages.
 
-We use the spt for this. If you
+We use the spt for this. Mapped files result in one or more SPT entries
+(one for each 4KB piece) with spe_status mapped_file or mapped_file_nowriteback.
+When a page faults occurs, we look up the SPT entry and allocate a frame and
+write the file contents (usually a 4KB piece somewhere in the file) into the new frame.
+We then mark the SPT entry as frame_from_file, indicating that it can be evicted either by simply removing the frame (frame has not been written to) or by writing the frame contents back to the file (frame contents have been written to). The contents can later be read back into a new frame from the file.
+We use the same mechanism for lazy-loaded code and data segments. For writable pages
+like data segments, we use mapped_file_nowriteback to indicate that the frame has to be written to swap and cannot be read back in from the file once it has initially been loaded.
 
 >> C3: Explain how you determine whether a new file mapping overlaps
 >> any existing segment.
@@ -378,17 +422,23 @@ and their address. We can use a simple for loop:
 for (unsigned int i = 0; i < file_size; i += PGSIZE)
 …
 
-We can iterate over the hash map with "start address" + i, if we their an entry,
-then it overlapping.
+We can iterate over all the affected page addresses in the hash map with "start address" + i, if there is an entry, then it overlaps.
 
 ---- RATIONALE ----
 
 >> C4: Mappings created with "mmap" have similar semantics to those of
->> data demand-paged from executables, except that "mmap" mappings are
+>> demand-paged data from executables, except that "mmap" mappings are
 >> written back to their original files, not to swap.  This implies
 >> that much of their implementation can be shared.  Explain why your
 >> implementation either does or does not share much of the code for
 >> the two situations.
+
+We share most of the code for these two features. The only deviations are explained in the answer above.
+We use basically the same code for read-only code segments.
+Because code pages cannot be written to, the page table entries will not be dirty and therefore we will never write back the lazy-loaded code into the executable file.
+We have slightly different logic for modifiable segments (like data) (status mapped_file_nowriteback) because we do swap those out and do not write changes back to the file system.
+
+
 
 			   SURVEY QUESTIONS
 			   ================
@@ -413,3 +463,4 @@ the quarter.
 >> students, either for future quarters or the remaining projects?
 
 >> Any other comments?
+
