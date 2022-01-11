@@ -31,7 +31,7 @@ Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
 
 struct thread {
     …
-    uint8_t *user_esp; The user stackpointer, this is requeired for a syscall.
+    uint8_t *user_esp; The user stackpointer, this is required for a syscall (growing the stack).
     struct hash spt; The supllemntalpagetable
     …
 }
@@ -102,11 +102,19 @@ The reverse function.
 >> A2: In a few paragraphs, describe your code for locating the frame,
 >> if any, that contains the data of a given page.
 
-if a page fault occurs, then we will lookup the fault address in the spt (supplemental page table).
-If the spt entry has the status "frame", then we do a loop up in the frame table.
+if a page fault occurs, then we will lookup the fault address (rounded down to page address)
+ in the spt (supplemental page table).
+If the spt entry had the status "frame", then it is already mapped and no page fault would occur.
+Depending on the spe_status we map in a zero page, code page or swap in the frame from swap device.
 
-The frame table is an array and the index of the frame entry is a shifted address
-with a magic number.
+We use palloc to allocate a new physical frame and therefore palloc tells us the frame address.
+We keep track of the allocated frames in the frame table, to know when we need to swap etc.
+
+After the initial page fault, the address mapping is saved in the pagedir of the process.
+
+The frame table is an array and the index of the frame entry is a function of the physical frame address.
+The constant least-significant 12 bits are stripped and the offset of the 1MB magic number is removed
+(taken from palloc implementation).
 
 >> A3: How does your code coordinate accessed and dirty bits between
 >> kernel and user virtual addresses that alias a single frame, or
@@ -133,6 +141,11 @@ is done allocating a frame (possibly swapping out another frame).
 
 >> A5: Why did you choose the data structure(s) that you did for
 >> representing virtual-to-physical mappings?
+
+We choose an array of struct for the frame table, because the access is very fast.
+We use as index a shifted address.
+
+For the spt we choose an
 
 
 
