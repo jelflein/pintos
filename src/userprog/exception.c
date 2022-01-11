@@ -176,7 +176,6 @@ page_fault (struct intr_frame *f)
   void* stack_pointer = f->esp;
   if (is_syscall) stack_pointer = t->user_esp;
 
-  // TODO: Implement stack size limit
   if (spt_entry == NULL
     && (
       // PUSH, CALL or PUSHA instruction may fault 4 or 32 bytes above the stack

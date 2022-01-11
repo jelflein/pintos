@@ -89,10 +89,6 @@ syscall_handler(struct intr_frame *f) {
 
   t->user_esp = f->esp;
 
-  //if (t->tid == 9) {
-    //printf("syscall from tid=%u: %u\n", t->tid, *stack);
-  //}
-
   switch (*stack) {
     case SYS_EXIT: {
       handler_exit(stack);
@@ -482,11 +478,9 @@ void handler_fs_open(struct intr_frame *f) {
   readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
 
   //lock
-  //printf("Opening from tid %u\n", thread_current()->tid);
   lock_acquire(&file_sema);
   struct file *file_pointer = filesys_open(file);
   lock_release(&file_sema);
-  //printf("Done Opening from tid %u\n", thread_current()->tid);
 
   //fail open failed
   if (file_pointer == 0) {

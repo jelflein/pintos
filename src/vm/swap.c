@@ -35,8 +35,6 @@ size_t frame_to_swap(void *addr) {
   {
     // out of swap space
     ASSERT(0);
-    // TODO: Handle this error
-    return -1;
   }
 
   // write out every sector that makes up this slot
