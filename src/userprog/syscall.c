@@ -89,6 +89,10 @@ syscall_handler(struct intr_frame *f) {
 
   t->user_esp = f->esp;
 
+  //if (t->tid == 9) {
+    //printf("syscall from tid=%u: %u\n", t->tid, *stack);
+  //}
+
   switch (*stack) {
     case SYS_EXIT: {
       handler_exit(stack);
@@ -478,9 +482,11 @@ void handler_fs_open(struct intr_frame *f) {
   readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
 
   //lock
+  //printf("Opening from tid %u\n", thread_current()->tid);
   lock_acquire(&file_sema);
   struct file *file_pointer = filesys_open(file);
   lock_release(&file_sema);
+  //printf("Done Opening from tid %u\n", thread_current()->tid);
 
   //fail open failed
   if (file_pointer == 0) {
@@ -583,11 +589,12 @@ void handler_fs_read(struct intr_frame *f) {
       break;
     }
 
+    lock_release(&file_sema);
     if (!try_writeu(kbuffer, chunk_size, buffer + read_so_far)) {
-      lock_release(&file_sema);
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
+    lock_acquire(&file_sema);
 
     read_so_far += chunk_size;
   }
@@ -633,11 +640,12 @@ void handler_fs_write(struct intr_frame *f) {
   for (; written_so_far < size;) {
     size_t chunk_size = MIN(sizeof kbuffer, size - written_so_far);
 
+    lock_release(&file_sema);
     if (!try_readu(buffer + written_so_far, chunk_size, kbuffer)) {
-      lock_release(&file_sema);
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
+    lock_acquire(&file_sema);
 
     chunk_size = file_write(fd->f, kbuffer, (off_t) chunk_size);
 
@@ -738,7 +746,6 @@ void handler_fs_close(struct intr_frame *f) {
   free(fd);
 }
 
-//TODO sync!
 void handler_mmap(struct intr_frame *f) {
   int *stack = f->esp;
 
@@ -841,8 +848,6 @@ void handler_mmap(struct intr_frame *f) {
   f->eax = m_file->id;
 }
 
-//TODO remove entries
-//Impl. flush
 /*
  * impl. remove_page
  * impl. remove_page from suplt table.
@@ -864,71 +869,77 @@ void handler_munmap(struct intr_frame *f) {
     lock_release(&file_sema);
     return;
   }
+
+  lock_release(&file_sema);
+
   //remove from supplemental table, page table. Flush if necessary
-  unsync_close_mfile(t, m_file);
+  close_mfile(t, m_file);
 
   list_remove(&(m_file->list_elem));
-  lock_release(&file_sema);
 
   free(m_file);
 }
 
-void unsync_close_mfile(struct thread *t, struct m_file *m_file) {
+void close_mfile(struct thread *t, struct m_file *m_file) {
   //flush
   uint32_t mapped_file_vaddr = m_file->vaddr;
   tid_t pid = t->tid;
 
+  fs_lock();
+  off_t fileLength = file_length(m_file->file);
+  fs_unlock();
   frametable_lock();
-  for (int i = 0; i < file_length(m_file->file); i += PGSIZE) {
-    struct spt_entry *entry = spt_get_entry(thread_current(), (uint32_t)
-                                                                      mapped_file_vaddr +
-                                                              i, pid);
-    ASSERT(entry != NULL);
-    if (entry->spe_status == frame_from_file) {
+  for (int i = 0; i < fileLength; i += PGSIZE) {
+    struct spt_entry *entry_ptr = spt_get_entry(t,
+            (uint32_t)mapped_file_vaddr + i, pid);
+    struct spt_entry entry_copy = *entry_ptr;
+
+    ASSERT(entry_ptr != NULL);
+
+    if (entry_copy.spe_status == frame_from_file) {
       // page is actually mapped, has been accessed at least once.
       void *page_vaddr = (void *) mapped_file_vaddr + i;
       void *kaddr = pagedir_get_page(t->pagedir, page_vaddr);
       if (pagedir_is_dirty(t->pagedir, page_vaddr)) {
-        // page has been written to
-        file_seek(m_file->file, (int) entry->file_offset);
-
-        void *kaddr2 = pagedir_get_page(t->pagedir, (void*)page_vaddr);
-        file_write(m_file->file, (void *) kaddr, (int) entry->read_bytes);
-
         pagedir_set_dirty(t->pagedir, page_vaddr, false);
+        set_pinned(kaddr);
+        frametable_unlock();
+        // page has been written to
+        fs_lock();
+        file_seek(m_file->file, (int) entry_copy.file_offset);
+        file_write(m_file->file, (void *) kaddr, (int) entry_copy.read_bytes);
+        fs_unlock();
+
+        frametable_lock();
       }
     }
-    else if (entry->spe_status == mapped_file){
+    else if (entry_copy.spe_status == mapped_file){
       // all good, no need to write back
     }
     else {
       ASSERT(0);
     }
+
     spt_remove_entry(mapped_file_vaddr + i, t);
   }
   frametable_unlock();
 
+  fs_lock();
   file_close(m_file->file);
+  fs_unlock();
 }
 
 void fs_lock()
 {
-  if(!lock_held_by_current_thread(&file_sema))
-  {
-    lock_acquire(&file_sema);
-  }
+  lock_acquire(&file_sema);
 }
 
 void fs_unlock()
 {
-  if(lock_held_by_current_thread(&file_sema))
-  {
-    lock_release(&file_sema);
-  }
+  lock_release(&file_sema);
 }
 
-void close_mfile(struct thread *t, struct m_file *m_file) {
-  lock_acquire(&file_sema);
-  unsync_close_mfile(t, m_file);
-  lock_release(&file_sema);
+bool fs_lock_held_by_current_thread()
+{
+  return lock_held_by_current_thread(&file_sema);
 }

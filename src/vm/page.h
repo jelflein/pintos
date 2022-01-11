@@ -24,7 +24,7 @@ enum spe_status {
     swap,
     frame,
     mapped_file,
-    mapped_file_nowriteback
+    mapped_file_nowriteback,
 };
 
 struct spt_entry {

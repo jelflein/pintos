@@ -9,7 +9,7 @@ enum palloc_flags;
 struct frame_entry {
     uint32_t page;
     struct thread *thread;
-
+    bool pinned;
     uint8_t eviction_score;
 };
 
@@ -24,3 +24,5 @@ void compute_eviction_score(void);
 
 void frametable_lock(void);
 void frametable_unlock(void);
+
+void set_pinned(void* frame);

@@ -26,12 +26,7 @@ int32_t index_of_smallest_score = -1;
 #define TABLE_INDEX(addr) (vtop(addr - ONE_MB) >> 12)
 #define ADDR_FROM_TABLE_INDEX(idx) (ptov(idx << 12) + ONE_MB)
 
-void do_swapping();
-
-static void *get_kaddr_for_index(uint32_t idx)
-{
-  return ADDR_FROM_TABLE_INDEX(idx);
-}
+void do_swapping(void);
 
 void frametable_lock()
 {
@@ -43,15 +38,11 @@ void frametable_unlock()
 }
 
 
-bool entry_is_empty(struct frame_entry entry)
+static bool entry_is_empty(struct frame_entry entry)
 {
   return entry.thread == NULL;
 }
 
-void *entry_get_page(struct frame_entry entry)
-{
-  return (void *)entry.page;
-}
 
 static struct frame_entry get_entry_to_evict(uint32_t *idx);
 
@@ -75,7 +66,7 @@ static struct frame_entry get_entry_to_evict(uint32_t *idx)
   for (uint32_t i = 0; i < num_frames_total; i++)
   {
     struct frame_entry entry = frame_table[i];
-    if (!entry_is_empty(entry))
+    if (!entry_is_empty(entry) && entry.pinned == false)
     {
       if (entry.eviction_score < smallest_score)
       {
@@ -89,6 +80,7 @@ static struct frame_entry get_entry_to_evict(uint32_t *idx)
   frame_table[smallest_index].thread = NULL;
   frame_table[smallest_index].page = 0;
   frame_table[smallest_index].eviction_score = 0;
+  frame_table[smallest_index].pinned = false;
   *idx = smallest_index;
   intr_set_level(il);
   return fe;
@@ -123,6 +115,7 @@ allocate_frame(struct thread *t, enum palloc_flags fgs, uint32_t page_addr)
     .page = page_addr,
     .thread = t,
     .eviction_score = 50,
+    .pinned = false
   };
   frame_table[TABLE_INDEX(u_frame)] = e;
 
@@ -154,11 +147,13 @@ void do_swapping() {
     se->spe_status = mapped_file;
     if (se->writable)
     {
-      //TODO
-      //fs_lock();
+      bool was_already_locked = fs_lock_held_by_current_thread();
+      if (!was_already_locked) fs_lock();
+
       file_seek(se->file, (int) se->file_offset);
       file_write(se->file, kernel_addr, (int) se->read_bytes);
-      //fs_unlock();
+
+      if (!was_already_locked) fs_unlock();
     }
 
 
@@ -186,6 +181,7 @@ void free_frame(void *frame)
     .page = 0,
     .thread = NULL,
     .eviction_score = 0,
+    .pinned = false
   };
 
   frame_table[TABLE_INDEX(frame)] = e;
@@ -196,7 +192,7 @@ void free_frame(void *frame)
 }
 
 
-uint32_t divide_round_up(uint32_t a, uint32_t b)
+static uint32_t divide_round_up(uint32_t a, uint32_t b)
 {
   return (a + b - 1) / b;
 }
@@ -215,6 +211,17 @@ void frame_table_init(uint32_t num_user_frames, uint32_t num_total_frames)
                                     divide_round_up(table_size_bytes, PGSIZE));
 }
 
+void set_pinned(void* frame)
+{
+  uint32_t index = TABLE_INDEX(frame);
+  struct frame_entry fe = frame_table[index];
+
+  ASSERT(!entry_is_empty(fe));
+  fe.pinned = true;
+
+  if ((int32_t)index == index_of_smallest_score)
+    compute_eviction_score();
+}
 
 void compute_eviction_score()
 {
@@ -223,7 +230,7 @@ void compute_eviction_score()
   for (uint32_t i = 0; i < num_frames_total; i++)
   {
     struct frame_entry entry = frame_table[i];
-    if (!entry_is_empty(entry))
+    if (!entry_is_empty(entry) && entry.pinned == false)
     {
       void *kernel_addr = ADDR_FROM_TABLE_INDEX(i);
       // check user address and kernel address

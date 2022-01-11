@@ -132,7 +132,7 @@ verify (void)
         {
           if (buf2[buf_idx] != hist_idx)
           {
-            printf("bad value %d in byte %zu\n", buf2[buf_idx], buf_idx);
+            fail("bad value %d in byte %zu\n", buf2[buf_idx], buf_idx);
           }
           buf_idx++;
         } 
