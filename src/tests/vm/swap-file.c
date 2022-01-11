@@ -16,7 +16,7 @@
 #define TWO_MB (ONE_MB*2)
 
 
-#define CHUNK_SIZE (17 * 512)
+#define CHUNK_SIZE (126 * 512)
 #define CHUNK_CNT 1                            /* Number of chunks. */
 #define DATA_SIZE (CHUNK_CNT * CHUNK_SIZE)      /* Buffer size. */
 //unsigned char data[ONE_MB/2 - 27*4096];

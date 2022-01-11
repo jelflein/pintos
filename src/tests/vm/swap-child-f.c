@@ -49,6 +49,8 @@ main (int argc UNUSED, char *argv[])
   seek(handle, (child_id - 1) * CHUNK_SIZE);
   printf("Seek to address %p\n", (child_id - 1) * CHUNK_SIZE);
   size = read (handle, data, CHUNK_SIZE);
+  printf("chunk_size = %u\n", CHUNK_SIZE);
+  printf("size = %u\n", size);
   CHECK(size == CHUNK_SIZE, "read correct chunk size");
   for (i = 0; i < size; i++)
   {
