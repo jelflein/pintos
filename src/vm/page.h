@@ -13,6 +13,7 @@
 #include <filesys/off_t.h>
 #include "../lib/user/syscall.h"
 #include "../lib/kernel/hash.h"
+#include "../userprog/process.h"
 
 
 struct file;
@@ -42,7 +43,9 @@ struct spt_entry {
     size_t swap_slot;
 
     bool writable;
+    bool shared;
 
+    struct shared_segment *shared_seg;
     struct hash_elem elem;
 };
 
@@ -64,7 +67,7 @@ spe_status);
 
 bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
                            bool writable, struct file *mapped_f,
-                           size_t file_offset, size_t file_read_size, bool write_back_to_file);
+                           size_t file_offset, size_t file_read_size, bool write_back_to_file, struct shared_segment *shared_seg);
 
 
 struct spt_entry *spt_get_entry(struct thread *t, uint32_t vaddr, pid_t pid);

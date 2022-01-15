@@ -833,7 +833,7 @@ void handler_mmap(struct intr_frame *f) {
 
   for (int i = 0; i < file_length(reopend_file); i += PGSIZE) {
     spt_entry_mapped_file((uint32_t) addr + i, t->tid, true, reopend_file,
-                          i, MIN(file_length(reopend_file) - i, PGSIZE), true);
+                          i, MIN(file_length(reopend_file) - i, PGSIZE), true, NULL);
   }
 
   list_push_back(&t->mapped_files, &m_file->list_elem);

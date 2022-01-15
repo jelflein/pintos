@@ -131,6 +131,7 @@ kernel_main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
+  init_segement_lock();
   swap_init();
   printf ("Boot complete.\n");
   

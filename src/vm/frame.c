@@ -161,7 +161,13 @@ void do_swapping() {
       //fs_unlock();
     }
 
+    if (se->shared)
+    {
+      struct shared_segment *share = se->shared_seg;
 
+      share->frame = 0;
+      share->framed = false;
+    }
     free_frame(kernel_addr);
   }
   else if (se->writable && se->spe_status == frame)

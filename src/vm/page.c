@@ -10,6 +10,7 @@
 #include "../threads/vaddr.h"
 #include "frame.h"
 #include "swap.h"
+#include "../userprog/process.h"
 #include <threads/thread.h>
 
 
@@ -77,6 +78,9 @@ static struct spt_entry *_spt_entry(struct hash *spt, uint32_t vaddr, pid_t pid,
   e->spe_status = spe_status;
   e->writable = writable;
 
+  e->shared_seg = NULL;
+  e->shared = false;
+
   hash_insert(spt, &e->elem);
 
   return e;
@@ -102,7 +106,7 @@ bool spt_entry(struct thread *t, uint32_t vaddr, pid_t pid, uint32_t frame_addr,
 bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
                            bool writable, struct file *mapped_f,
                            size_t file_offset, size_t file_read_size,
-                           bool write_back_to_file)
+                           bool write_back_to_file, struct shared_segment *shared_seg)
 {
   struct spt_entry *entry = _spt_entry(&thread_current()->spt, vaddr,
           pid, 0,
@@ -115,6 +119,12 @@ bool spt_entry_mapped_file(uint32_t vaddr, pid_t pid,
   entry->file = mapped_f;
   entry->file_offset = file_offset;
   entry->read_bytes = file_read_size;
+  entry->shared_seg = shared_seg;
+
+  if (shared_seg != NULL)
+    entry->shared = true;
+  else
+    entry->shared = false;
 
   return true;
 }
@@ -164,7 +174,21 @@ _spt_remove_entry(uint32_t vaddr, struct thread *t, const struct spt_entry *e) {
     void *paddr = pagedir_get_page(t->pagedir, (void *)vaddr);
     ASSERT(paddr != NULL);
     pagedir_clear_page(t->pagedir, (void *)vaddr);
-    free_frame((void *)paddr);
+
+    if (e->shared)
+    {
+      struct shared_segment *shared_seg = e->shared_seg;
+      shared_seg->use_counter--;
+
+      if (shared_seg->use_counter == 0)
+      {
+        printf("%p\n", paddr);
+        free(shared_seg);
+        if (shared_seg->framed) free_frame((void *)paddr);
+      }
+    } else {
+      free_frame((void *) paddr);
+    }
   } else if (e->spe_status == swap) {
       //remove from swap part.
     set_swap_index(e->swap_slot, false);

@@ -26,9 +26,12 @@
 
 static thread_func start_process NO_RETURN;
 
+static struct shared_segment * find_shared_segment(const char *path, void* page);
 static bool load(const char *file_name, void (**eip)(void), void **esp,
                  const char *arg_line);
 
+struct lock segment_lock;
+struct list segments;
 
 #define NUM_ARGS_LIMIT 32
 #define ARG_SIZE_LIMIT 32
@@ -37,6 +40,12 @@ struct process_arguments {
     char file_name[PROGRAM_NAME_SIZE_LIMIT];
     char args[ARG_SIZE_LIMIT][NUM_ARGS_LIMIT];
 };
+
+void
+init_segement_lock() {
+  lock_init(&segment_lock);
+  list_init(&segments);
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -198,8 +207,10 @@ process_exit(void) {
 
   // destroy supplemental page table of process
   // this also clears the page table, frame table, swap
+  lock_acquire(&segment_lock);
   if (!cur->is_main_thread)
     spt_destroy(&cur->spt);
+  lock_release(&segment_lock);
 
 
   /* Destroy the current process's page directory and switch back
@@ -299,9 +310,9 @@ static bool setup_stack(void **esp, const char *cmdline);
 
 static bool validate_segment(const struct Elf32_Phdr *, struct file *);
 
-static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
-                         uint32_t read_bytes, uint32_t zero_bytes,
-                         bool writable);
+static bool
+load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes, bool writable,
+             const char *file_name);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
@@ -387,8 +398,9 @@ load(const char *file_name, void (**eip)(void), void **esp, const char
             read_bytes = 0;
             zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
           }
+
           if (!load_segment(file, file_page, (void *) mem_page,
-                            read_bytes, zero_bytes, writable))
+                            read_bytes, zero_bytes, writable, file_name))
             goto done;
         } else
           goto done;
@@ -482,11 +494,13 @@ validate_segment(const struct Elf32_Phdr *phdr, struct file *file) {
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
 static bool
-load_segment(struct file *file, off_t ofs, uint8_t *upage,
-             uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
+load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes, bool writable,
+             const char *file_name) {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs(upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
+
+  lock_acquire(&segment_lock);
 
   off_t file_offset = ofs;
 
@@ -502,17 +516,43 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
       if (!spt_entry_empty((uint32_t)upage, thread_current()->tid, writable,
                            zeroes))
       {
+        lock_release(&segment_lock);
         return false;
       }
     }
     else {
       /* Add the page to the process's address space. */
+      //if
+      struct shared_segment *shared_segment = find_shared_segment(file_name, upage);
+
+      if (shared_segment == NULL) {
+        //printf("create new shared seg\n");
+        shared_segment = malloc(sizeof(struct shared_segment));
+        shared_segment->framed = false;
+
+        //printf("seg %s\n", shared_segment->program_path);
+        //printf("%s\n", shared_segment->program_path);
+
+        strlcpy(shared_segment->program_path, file_name, 128);
+
+        shared_segment->use_counter = 1;
+
+        if (shared_segment == NULL) {
+          PANIC("no memory");
+        }
+
+        list_push_back(&segments, &shared_segment->list_elem);
+
+        //printf("%s\n", shared_segment->program_path);
+      }
 
       if (!spt_entry_mapped_file((uint32_t)upage, thread_current()->tid, writable,
                                  file, file_offset, page_read_bytes,
-                                 !writable)) {
+                                 !writable, shared_segment)) {
+        lock_release(&segment_lock);
         return false;
       }
+
       file_offset += (int)page_read_bytes;
     }
 
@@ -521,6 +561,8 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
     zero_bytes -= page_zero_bytes;
     upage += PGSIZE;
   }
+
+  lock_release(&segment_lock);
   return true;
 }
 
@@ -687,4 +729,23 @@ process_terminate(struct thread *t, int status_code, const char *cmd_line)
   sema_up(&t->wait_sema);
 
   thread_exit();
+}
+
+static struct shared_segment *
+find_shared_segment(const char *path, void* page) {
+  struct list_elem *e;
+
+  for (e = list_begin(&segments);
+       e != list_end(&segments);
+       e = list_next(e)) {
+    struct shared_segment *entry = list_entry(e,
+                                               struct shared_segment,
+                                               list_elem);
+
+    if (strcmp(entry->program_path, path) == 0 && entry->page == (uint32_t ) page) {
+      return entry;
+    }
+  }
+
+  return NULL;
 }

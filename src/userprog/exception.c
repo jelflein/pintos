@@ -203,10 +203,34 @@ page_fault (struct intr_frame *f)
     spt_entry = spt_get_entry(thread_current(), page_vaddr, t->tid);
   }
 
+  printf("fault %p\n", fault_addr);
   if (spt_entry != NULL) {
     // SPT entry but no mapping in page table exists yet
     frametable_unlock();
-    void *frame_pointer = allocate_frame(t, PAL_ZERO, page_vaddr);
+
+    void *frame_pointer;
+
+    if (spt_entry->shared && spt_entry->shared_seg->framed)
+    {
+      //printf("in shared_seg\n");
+      frame_pointer = (void*) spt_entry->shared_seg->frame;
+    }
+    else {
+      frame_pointer = allocate_frame(t, PAL_ZERO, page_vaddr);
+
+      //printf("f %p\n", frame_pointer);
+
+      if (spt_entry->shared)
+      {
+        spt_entry->spe_status = mapped_file_nowriteback;
+        spt_entry->shared_seg->frame = (uint32_t) frame_pointer;
+        spt_entry->shared_seg->framed = true;
+      }
+
+
+      //printf("end\n");
+    }
+
     frametable_lock();
 
     ASSERT(frame_pointer != NULL);
