@@ -1,6 +1,7 @@
 #include "devices/shutdown.h"
 #include <console.h>
 #include <stdio.h>
+#include <filesys/cache.h>
 #include "devices/kbd.h"
 #include "devices/serial.h"
 #include "devices/timer.h"
@@ -92,6 +93,9 @@ shutdown_power_off (void)
 
 #ifdef FILESYS
   filesys_done ();
+  printf("waiting for shutdown\n");
+  cache_shutdown();
+  printf("after shutdown\n");
 #endif
 
   print_stats ();

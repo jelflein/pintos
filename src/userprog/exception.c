@@ -169,6 +169,8 @@ page_fault (struct intr_frame *f)
   }
 
   uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
+  printf("vaddr %p\n", (void *) page_vaddr);
+
   frametable_lock();
   struct spt_entry *spt_entry = spt_get_entry(thread_current(), page_vaddr, t
           ->tid);
