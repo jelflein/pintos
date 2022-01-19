@@ -121,12 +121,12 @@ static void cache_evict_some_entry()
   struct cache_entry *entry_to_evict = cache_get_entry(sector);
   if (entry_to_evict->dirty)
   {
-    printf("Buffercache: evict entry to disk\n");
+    d_printf("Buffercache: evict entry to disk\n");
     block_write(fs_device, entry_to_evict->sector, entry_to_evict->data);
   }
   else
   {
-    printf("Buffercache: evict undirty entry\n");
+    d_printf("Buffercache: evict undirty entry\n");
   }
   _delete_entry(entry_to_evict);
 }
@@ -144,7 +144,7 @@ static void write_cache_to_disk()
     ASSERT(!e->pinned)
     if (e->dirty)
     {
-      printf("Buffercache: flushing sector %u to disk\n", e->sector);
+      d_printf("Buffercache: flushing sector %u to disk\n", e->sector);
       e->pinned = true;
       e->dirty = false;
       block_write(fs_device, e->sector, e->data);
@@ -181,7 +181,7 @@ static _Noreturn void thread_flush(void)
 void
 cache_block_read (struct block *block, block_sector_t sector, void *buffer)
 {
-  printf("read sector %u from ", sector);
+  d_printf("read sector %u from ", sector);
   // Unterscheiden ob es drin ist oder nicht
   struct cache_entry *c_entry = cache_get_entry(sector);
 
@@ -211,7 +211,7 @@ void
 cache_block_write (struct block *block, block_sector_t sector, const void
         *buffer)
 {
-  printf("write sector %u\n", sector);
+  d_printf("write sector %u\n", sector);
 
   struct cache_entry *c_entry = cache_get_entry(sector);
 

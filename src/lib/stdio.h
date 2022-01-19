@@ -17,6 +17,7 @@
 
 /* Standard functions. */
 int printf (const char *, ...) PRINTF_FORMAT (1, 2);
+int d_printf (const char *, ...) PRINTF_FORMAT (1, 2);
 int snprintf (char *, size_t, const char *, ...) PRINTF_FORMAT (3, 4);
 int vprintf (const char *, va_list) PRINTF_FORMAT (1, 0);
 int vsnprintf (char *, size_t, const char *, va_list) PRINTF_FORMAT (3, 0);

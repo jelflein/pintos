@@ -87,7 +87,30 @@ printf (const char *format, ...)
 
   return retval;
 }
-
+
+int
+d_printf (const char *format, ...)
+{
+#if DEBUG
+  static const bool disable = false;
+#elif
+  static const bool disable = true;
+#endif
+
+  if (disable) return 0;
+
+  va_list args;
+  int retval;
+
+  va_start (args, format);
+  retval = vprintf (format, args);
+  va_end (args);
+
+
+  return retval;
+}
+
+
 /* printf() formatting internals. */
 
 /* A printf() conversion. */
