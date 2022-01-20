@@ -131,56 +131,47 @@ static void cache_evict_some_entry(void)
 
   ASSERT(lowest_c_entry != NULL && "Have to find one entry to evict");
 
-  struct cache_entry *lowest_c_entry_copy = malloc(sizeof(struct cache_entry));
-  memcpy(lowest_c_entry_copy, lowest_c_entry, sizeof(struct cache_entry));
-  _delete_entry(lowest_c_entry);
+  lock_acquire(&lowest_c_entry->lock);
 
-  if (lowest_c_entry_copy->dirty)
+  if (lowest_c_entry->dirty)
   {
     d_printf("Buffercache: evict entry to disk\n");
-    block_write(fs_device, lowest_c_entry_copy->sector, lowest_c_entry_copy
-    ->data);
+    block_write(fs_device, lowest_c_entry->sector, lowest_c_entry->data);
   }
   else {
     d_printf("Buffercache: evict undirty entry\n");
   }
-  free(lowest_c_entry_copy);
+  lock_release(&lowest_c_entry->lock);
+  _delete_entry(lowest_c_entry);
 }
 
 static void write_cache_to_disk(void)
 {
-  struct hash_iterator iter;
-  hash_first(&iter, &cache);
+  for (int i = 0; i < CACHE_ENTRIES; i++) {
+    struct hash_iterator iter;
+    hash_first(&iter, &cache);
 
-  struct cache_entry **flush_entries = malloc(CACHE_ENTRIES * sizeof(void *));
-  memset(flush_entries, 0, CACHE_ENTRIES * sizeof(struct
-          cache_entry));
+    bool at_least_one_dirty = false;
+    while (hash_next(&iter)) {
+      struct cache_entry *e = hash_entry(hash_cur(&iter), struct cache_entry,
+                                         elem);
 
-  uint8_t i = 0;
-  while (hash_next(&iter))
-  {
-    struct cache_entry *e = hash_entry(hash_cur(&iter), struct cache_entry,
-                                       elem);
-
-    ASSERT(!e->pinned)
-    if (e->dirty)
-    {
-      d_printf("Buffercache: flushing sector %u to disk\n", e->sector);
-      e->pinned = true;
-      e->dirty = false;
-      lock_acquire(&e->lock);
-
-      flush_entries[i] = e;
-      i++;
+      if (e->dirty && !e->pinned) {
+        at_least_one_dirty = true;
+        d_printf("Buffercache: flushing sector %u to disk\n", e->sector);
+        e->pinned = true;
+        e->dirty = false;
+        lock_acquire(&e->lock);
+        block_write(fs_device, e->sector, e->data);
+        lock_release(&e->lock);
+        e->pinned = false;
+        // we cannot continue iterating after blocking for a while, iterator
+        // invalid
+        break;
+      }
     }
-  }
 
-  for (int j = 0; j < i; j++)
-  {
-    struct cache_entry *e = flush_entries[j];
-    block_write(fs_device, e->sector, e->data);
-    lock_release(&e->lock);
-    e->pinned = false;
+    if (!at_least_one_dirty) break;
   }
 }
 
@@ -221,7 +212,7 @@ cache_block_write (struct block *block, block_sector_t sector, const void
 
 void
 cache_block_write_chunk (struct block *block, block_sector_t sector, const
-  void *buffer, uint32_t chunk_size, uint32_t sector_ofs) {
+  void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
   ASSERT(sector_ofs < BLOCK_SECTOR_SIZE);
   ASSERT(sector_ofs + chunk_size <= BLOCK_SECTOR_SIZE);
   ASSERT(fs_device == block);
@@ -230,8 +221,23 @@ cache_block_write_chunk (struct block *block, block_sector_t sector, const
 
   struct cache_entry *c_entry = cache_get_entry(sector);
 
-  //Not in Cache
-  if (c_entry == NULL) {
+  if (c_entry != NULL) {
+    lock_acquire(&c_entry->lock);
+    c_entry = cache_get_entry(sector);
+  }
+
+  if (c_entry != NULL)
+  {
+    c_entry->accessed = true;
+    c_entry->dirty = true;
+    c_entry->lru_timestamp = (uint32_t) get_time_since_start();
+
+    //assumption c_entry->data is complete loaded
+    memcpy(c_entry->data + sector_ofs, buffer, chunk_size);
+    lock_release(&c_entry->lock);
+  }
+  //Not in cache
+  else {
     bool acquired_evict_lock = false;
 
     if (!cache_has_space_available())
@@ -269,13 +275,6 @@ cache_block_write_chunk (struct block *block, block_sector_t sector, const
     c_entry->accessed = true;
     c_entry->lru_timestamp = (uint32_t) get_time_since_start();
     c_entry->pinned = false;
-  } else {
-    c_entry->accessed = true;
-    c_entry->dirty = true;
-    c_entry->lru_timestamp = (uint32_t) get_time_since_start();
-
-    //assumption c_entry->data is complete loaded
-    memcpy(c_entry->data + sector_ofs, buffer, chunk_size);
   }
 }
 
@@ -297,30 +296,24 @@ cache_block_read_chunk(struct block *block, block_sector_t sector, void
 
     if (!cache_has_space_available())
     {
-      d_printf("a lock read\n");
       lock_acquire(&eviction_lock);
       acquired_evict_lock = true;
       cache_evict_some_entry();
     }
 
-    d_printf("disk\n");
 
     c_entry = cache_create_entry(sector);
     ASSERT(c_entry != NULL);
     c_entry->pinned = true;
 
-    if(acquired_evict_lock) {
-      d_printf("release lock read\n");
+    if (acquired_evict_lock) {
       lock_release(&eviction_lock);
     }
 
     c_entry->lru_timestamp = (uint32_t)get_time_since_start();
 
-    d_printf("a lock read\n");
     lock_acquire(&c_entry->lock);
-    d_printf("in lock read\n");
     block_read(block, sector, c_entry->data);
-    d_printf("release lock read\n");
     lock_release(&c_entry->lock);
 
     memcpy(buffer, c_entry->data + sector_ofs, chunk_size);
