@@ -19,6 +19,8 @@ struct cache_entry {
 
     bool pinned;
 
+    uint32_t lru_timestamp;
+
     uint8_t data[BLOCK_SECTOR_SIZE];
 };
 

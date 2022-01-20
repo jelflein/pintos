@@ -25,5 +25,6 @@ void timer_udelay (int64_t microseconds);
 void timer_ndelay (int64_t nanoseconds);
 
 void timer_print_stats (void);
+int64_t get_time_since_start(void);
 
 #endif /* devices/timer.h */

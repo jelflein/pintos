@@ -253,3 +253,8 @@ real_time_delay(int64_t num, int32_t denom) {
     ASSERT(denom % 1000 == 0);
     busy_wait(loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 }
+
+int64_t get_time_since_start()
+{
+  return ticks;
+}
