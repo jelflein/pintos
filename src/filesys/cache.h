@@ -4,6 +4,7 @@
 
 #include <devices/block.h>
 #include <hash.h>
+#include "../threads/synch.h"
 
 #ifndef PINTOS_CACHE_H
 #define PINTOS_CACHE_H
@@ -21,6 +22,8 @@ struct cache_entry {
 
     uint32_t lru_timestamp;
 
+    struct lock lock;
+
     uint8_t data[BLOCK_SECTOR_SIZE];
 };
 
@@ -31,5 +34,13 @@ void
 cache_block_read (struct block *block, block_sector_t sector, void *buffer);
 
 void
+cache_block_read_chunk(struct block *block, block_sector_t sector, void
+        *buffer, uint32_t chunk_size, uint32_t sector_ofs);
+
+void
 cache_block_write (struct block *block, block_sector_t sector, const void
 *buffer);
+
+void
+cache_block_write_chunk (struct block *block, block_sector_t sector, const
+        void *buffer, uint32_t chunk_size, uint32_t sector_ofs);

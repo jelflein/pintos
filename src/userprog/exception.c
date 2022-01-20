@@ -169,7 +169,7 @@ page_fault (struct intr_frame *f)
   }
 
   uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
-  printf("vaddr %p\n", (void *) page_vaddr);
+  d_printf("vaddr %p\n", (void *) page_vaddr);
 
   frametable_lock();
   struct spt_entry *spt_entry = spt_get_entry(thread_current(), page_vaddr, t
@@ -220,6 +220,7 @@ page_fault (struct intr_frame *f)
 
 
     if (spt_entry->spe_status == mapped_file || spt_entry->spe_status == mapped_file_nowriteback) {
+      d_printf("m_file %p \n", (void *) spt_entry->vaddr);
       // read contents from file into newly allocated frame
       file_seek(spt_entry->file, (int)spt_entry->file_offset);
       // this may block and run another thread in the meantime

@@ -93,7 +93,7 @@ d_printf (const char *format, ...)
 {
 #if DEBUG
   static const bool disable = false;
-#elif
+#else
   static const bool disable = true;
 #endif
 

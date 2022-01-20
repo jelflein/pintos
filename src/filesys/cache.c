@@ -14,9 +14,11 @@
 
 #define CACHE_ENTRIES 64
 
-struct hash cache;
-struct block *fs_device;
-struct semaphore shutdown_sema;
+static struct hash cache;
+static struct block *fs_device;
+static struct semaphore shutdown_sema;
+
+static struct lock eviction_lock;
 
 /* Computes and returns the hash value for hash element E, given
    auxiliary data AUX. */
@@ -49,9 +51,11 @@ void init_cache()
   fs_device = block_get_role (BLOCK_FILESYS);
 
   sema_init(&shutdown_sema, 0);
+
+  lock_init(&eviction_lock);
 }
 
-struct cache_entry *cache_get_entry(block_sector_t sector)
+static struct cache_entry *cache_get_entry(block_sector_t sector)
 {
   struct cache_entry find_entry = {
           .sector = sector
@@ -65,7 +69,7 @@ struct cache_entry *cache_get_entry(block_sector_t sector)
   return hash_entry(elem, struct cache_entry, elem);
 }
 
-static bool cache_has_space_available()
+static bool cache_has_space_available(void)
 {
   return hash_size(&cache) < CACHE_ENTRIES;
 }
@@ -83,6 +87,7 @@ static struct cache_entry *cache_create_entry(block_sector_t sector)
   e->dirty = false;
   e->accessed = false;
   e->pinned = false;
+  lock_init(&e->lock);
 
   if (hash_insert(&cache, &e->elem) != NULL)
   {
@@ -99,9 +104,10 @@ static void _delete_entry(struct cache_entry *e)
 {
   struct hash_elem *he = hash_delete(&cache, &e->elem);
   ASSERT(he != NULL);
+  free(e);
 }
 
-static void cache_evict_some_entry()
+static void cache_evict_some_entry(void)
 {
   ASSERT(hash_size(&cache) > 0);
 
@@ -125,22 +131,32 @@ static void cache_evict_some_entry()
 
   ASSERT(lowest_c_entry != NULL && "Have to find one entry to evict");
 
-  if (lowest_c_entry->dirty)
+  struct cache_entry *lowest_c_entry_copy = malloc(sizeof(struct cache_entry));
+  memcpy(lowest_c_entry_copy, lowest_c_entry, sizeof(struct cache_entry));
+  _delete_entry(lowest_c_entry);
+
+  if (lowest_c_entry_copy->dirty)
   {
     d_printf("Buffercache: evict entry to disk\n");
-    block_write(fs_device, lowest_c_entry->sector, lowest_c_entry->data);
+    block_write(fs_device, lowest_c_entry_copy->sector, lowest_c_entry_copy
+    ->data);
   }
   else {
     d_printf("Buffercache: evict undirty entry\n");
   }
-  _delete_entry(lowest_c_entry);
+  free(lowest_c_entry_copy);
 }
 
-static void write_cache_to_disk()
+static void write_cache_to_disk(void)
 {
   struct hash_iterator iter;
   hash_first(&iter, &cache);
 
+  struct cache_entry **flush_entries = malloc(CACHE_ENTRIES * sizeof(void *));
+  memset(flush_entries, 0, CACHE_ENTRIES * sizeof(struct
+          cache_entry));
+
+  uint8_t i = 0;
   while (hash_next(&iter))
   {
     struct cache_entry *e = hash_entry(hash_cur(&iter), struct cache_entry,
@@ -152,9 +168,19 @@ static void write_cache_to_disk()
       d_printf("Buffercache: flushing sector %u to disk\n", e->sector);
       e->pinned = true;
       e->dirty = false;
-      block_write(fs_device, e->sector, e->data);
-      e->pinned = false;
+      lock_acquire(&e->lock);
+
+      flush_entries[i] = e;
+      i++;
     }
+  }
+
+  for (int j = 0; j < i; j++)
+  {
+    struct cache_entry *e = flush_entries[j];
+    block_write(fs_device, e->sector, e->data);
+    lock_release(&e->lock);
+    e->pinned = false;
   }
 }
 
@@ -175,7 +201,7 @@ static _Noreturn void thread_flush(void * aux UNUSED)
 
     if (!list_empty(&shutdown_sema.waiters))
     {
-      printf("sema up\n");
+      d_printf("sema up\n");
       sema_up(&shutdown_sema);
     }
   }
@@ -184,6 +210,81 @@ static _Noreturn void thread_flush(void * aux UNUSED)
 void
 cache_block_read (struct block *block, block_sector_t sector, void *buffer)
 {
+  cache_block_read_chunk(block, sector, buffer, BLOCK_SECTOR_SIZE, 0);
+}
+
+void
+cache_block_write (struct block *block, block_sector_t sector, const void
+        *buffer) {
+  cache_block_write_chunk(block, sector, buffer, BLOCK_SECTOR_SIZE, 0);
+}
+
+void
+cache_block_write_chunk (struct block *block, block_sector_t sector, const
+  void *buffer, uint32_t chunk_size, uint32_t sector_ofs) {
+  ASSERT(sector_ofs < BLOCK_SECTOR_SIZE);
+  ASSERT(sector_ofs + chunk_size <= BLOCK_SECTOR_SIZE);
+  ASSERT(fs_device == block);
+
+  d_printf("write sector %u\n", sector);
+
+  struct cache_entry *c_entry = cache_get_entry(sector);
+
+  //Not in Cache
+  if (c_entry == NULL) {
+    bool acquired_evict_lock = false;
+
+    if (!cache_has_space_available())
+    {
+      d_printf("a lock write\n");
+      lock_acquire(&eviction_lock);
+      acquired_evict_lock = true;
+      cache_evict_some_entry();
+    }
+
+    c_entry = cache_create_entry(sector);
+    ASSERT(c_entry != NULL);
+    c_entry->pinned = true;
+
+    if(acquired_evict_lock) {
+      d_printf("re lock write\n");
+      lock_release(&eviction_lock);
+    }
+
+    if (sector_ofs != 0 || chunk_size < BLOCK_SECTOR_SIZE)
+    {
+      // read whole sector in first
+      d_printf("a lock write\n");
+      lock_acquire(&c_entry->lock);
+      d_printf("in lock write\n");
+      block_read(block, sector, c_entry->data);
+      d_printf("release lock write\n");
+      lock_release(&c_entry->lock);
+    }
+
+    //push changes to cache
+    memcpy(c_entry->data + sector_ofs, buffer, chunk_size);
+
+    c_entry->dirty = true;
+    c_entry->accessed = true;
+    c_entry->lru_timestamp = (uint32_t) get_time_since_start();
+    c_entry->pinned = false;
+  } else {
+    c_entry->accessed = true;
+    c_entry->dirty = true;
+    c_entry->lru_timestamp = (uint32_t) get_time_since_start();
+
+    //assumption c_entry->data is complete loaded
+    memcpy(c_entry->data + sector_ofs, buffer, chunk_size);
+  }
+}
+
+void
+cache_block_read_chunk(struct block *block, block_sector_t sector, void
+*buffer, uint32_t chunk_size, uint32_t sector_ofs)
+{
+  ASSERT(sector_ofs < BLOCK_SECTOR_SIZE);
+  ASSERT(sector_ofs + chunk_size <= BLOCK_SECTOR_SIZE);
   ASSERT(fs_device == block);
 
   d_printf("read sector %u from ", sector);
@@ -192,61 +293,48 @@ cache_block_read (struct block *block, block_sector_t sector, void *buffer)
 
   if (c_entry == NULL)
   {
+    bool acquired_evict_lock = false;
+
     if (!cache_has_space_available())
     {
+      d_printf("a lock read\n");
+      lock_acquire(&eviction_lock);
+      acquired_evict_lock = true;
       cache_evict_some_entry();
     }
 
-    printf("disk\n");
+    d_printf("disk\n");
 
     c_entry = cache_create_entry(sector);
     ASSERT(c_entry != NULL);
+    c_entry->pinned = true;
+
+    if(acquired_evict_lock) {
+      d_printf("release lock read\n");
+      lock_release(&eviction_lock);
+    }
+
     c_entry->lru_timestamp = (uint32_t)get_time_since_start();
+
+    d_printf("a lock read\n");
+    lock_acquire(&c_entry->lock);
+    d_printf("in lock read\n");
     block_read(block, sector, c_entry->data);
-    memcpy(buffer, c_entry->data, BLOCK_SECTOR_SIZE);
+    d_printf("release lock read\n");
+    lock_release(&c_entry->lock);
+
+    memcpy(buffer, c_entry->data + sector_ofs, chunk_size);
+
+    c_entry->pinned = false;
   }
   else
   {
-    printf("cache\n");
+    d_printf("cache\n");
+
     c_entry->accessed = true;
     c_entry->lru_timestamp = (uint32_t)get_time_since_start();
-    memcpy(buffer, c_entry->data, BLOCK_SECTOR_SIZE);
-  }
-}
 
-void
-cache_block_write (struct block *block, block_sector_t sector, const void
-        *buffer)
-{
-  ASSERT(fs_device == block);
-
-  d_printf("write sector %u\n", sector);
-
-  struct cache_entry *c_entry = cache_get_entry(sector);
-
-  if (c_entry == NULL)
-  {
-    if (!cache_has_space_available())
-    {
-      cache_evict_some_entry();
-    }
-
-    c_entry = cache_create_entry(sector);
-    ASSERT(c_entry != NULL);
-
-    memcpy(c_entry->data, buffer, BLOCK_SECTOR_SIZE);
-
-    c_entry->dirty = true;
-    c_entry->accessed = true;
-    c_entry->lru_timestamp = (uint32_t)get_time_since_start();
-  }
-  else
-  {
-    c_entry->accessed = true;
-    c_entry->dirty = true;
-    c_entry->lru_timestamp = (uint32_t)get_time_since_start();
-
-    memcpy(c_entry->data, buffer, BLOCK_SECTOR_SIZE);
+    memcpy(buffer, c_entry->data + sector_ofs, chunk_size);
   }
 }
 
