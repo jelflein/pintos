@@ -134,7 +134,7 @@ static void _delete_entry(struct cache_entry *e) {
   ASSERT(he != NULL);
 }
 
-static struct cache_entry *cache_evict_some_entry(block_sector_t sector) {
+static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool create_new) {
   ASSERT(hash_size(&cache) > 0);
 
   if (cache_has_space_available()) return NULL;
@@ -179,25 +179,23 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector) {
       lowest_c_entry->lru_timestamp = get_time_since_start();
     }
 
-    if (!lowest_c_entry->is_evcting) continue;
-
-    _delete_entry(lowest_c_entry);
+    if (!lowest_c_entry->is_evcting)
+      {
+      d_printf("evcting recovery\n");
+      continue;
+    }
 
     lock_release(&lowest_c_entry->lock);
     lock_release(&eviction_lock);
 
-    struct cache_entry *c_entry = cache_get_entry(sector);
+    _delete_entry(lowest_c_entry);
 
-    if (c_entry != NULL)
-    {
-      ASSERT(c_entry->is_read_head);
-    } else
-    {
-      ASSERT(c_entry == NULL);
-    }
+    ASSERT(!cache_get_entry(lowest_c_entry->sector));
 
     free(lowest_c_entry);
-    return cache_create_entry(sector, true, false);
+
+    if(create_new) return cache_create_entry(sector, true, false);
+    return NULL;
   } while (true);
 }
 
@@ -276,7 +274,7 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
   struct cache_entry *c_entry = cache_get_entry(sector);
 
   if (c_entry == NULL) {
-    if (!cache_has_space_available()) c_entry = cache_evict_some_entry(sector);
+    if (!cache_has_space_available()) c_entry = cache_evict_some_entry(sector, true);
     else c_entry = cache_create_entry(sector, false, false);
 
     ASSERT(c_entry != NULL);
@@ -321,7 +319,7 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
   if (c_entry == NULL) {
     if (!cache_has_space_available()) {
       ASSERT(0);
-      c_entry = cache_evict_some_entry(sector);
+      c_entry = cache_evict_some_entry(sector, true);
     } else c_entry = cache_create_entry(sector, false, false);
   }
 
@@ -353,7 +351,7 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
 
   if (c_entry == NULL || is_read_head_entry) {
     if (!cache_has_space_available() && !is_read_head_entry){
-      c_entry = cache_evict_some_entry(sector);
+      c_entry = cache_evict_some_entry(sector, true);
     }
     else if (!is_read_head_entry)
     {
@@ -376,7 +374,7 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
     {
       if (!cache_has_space_available())
       {
-        c_entry = cache_evict_some_entry(sector);
+        cache_evict_some_entry(sector, false);
       }
 
       c_entry->is_read_head = false;
@@ -444,7 +442,7 @@ static void enqueue_read_ahead_sector(block_sector_t sector) {
   if (c_entry != NULL && c_entry->is_evcting)
   {
     c_entry->is_evcting = false;
-  } else {
+  } else if (c_entry != NULL) {
     return;
   }
 
