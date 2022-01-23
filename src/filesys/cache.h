@@ -21,7 +21,7 @@ struct cache_entry {
     bool is_evcting;
 
     bool is_read_head;
-    struct semaphore wating_sema;
+    struct condition read_ahead_waiting;
 
     uint32_t pinned;
 
