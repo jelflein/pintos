@@ -32,6 +32,7 @@ our (@disks);			# Extra disk images to pass to simulator.
 our ($loader_fn);		# Bootstrap loader.
 our (%geometry);		# IDE disk geometry.
 our ($align);			# Partition alignment.
+our ($gdb_port) = $ENV{"GDB_PORT"} || "1234"; # Port to listen on for GDB
 
 parse_command_line ();
 prepare_scratch_disk ();
@@ -100,7 +101,7 @@ sub parse_command_line {
 	  or exit 1;
     }
 
-    $sim = "qemu" if !defined $sim;
+    $sim = "bochs" if !defined $sim;
     $debug = "none" if !defined $debug;
     $vga = exists ($ENV{DISPLAY}) ? "window" : "none" if !defined $vga;
 
@@ -113,6 +114,8 @@ sub parse_command_line {
     $align = "bochs",
       print STDERR "warning: setting --align=bochs for Bochs support\n"
 	if $sim eq 'bochs' && defined ($align) && $align eq 'none';
+
+    $kill_on_failure = 0;
 }
 
 # usage($exitcode).
@@ -126,8 +129,8 @@ Usage: pintos [OPTION...] -- [ARGUMENT...]
 where each OPTION is one of the following options
   and each ARGUMENT is passed to Pintos kernel verbatim.
 Simulator selection:
-  --qemu                   (default) Use QEMU as simulator
-  --bochs                  Use Bochs as simulator
+  --bochs                  (default) Use Bochs as simulator
+  --qemu                   Use QEMU as simulator
   --player                 Use VMware Player as simulator
 Debugger selection:
   --no-debug               (default) No debugger
@@ -561,9 +564,12 @@ cpu: ips=1000000
 megs: $mem
 log: bochsout.txt
 panic: action=fatal
-user_shortcut: keys=ctrlaltdel
+# For older bochs:
+#user_shortcut: keys=ctrlaltdel
+# For more recent bochs:
+keyboard: user_shortcut=ctrl-alt-del
 EOF
-    print BOCHSRC "gdbstub: enabled=1\n" if $debug eq 'gdb';
+    print BOCHSRC "gdbstub: enabled=1, port=$gdb_port\n" if $debug eq 'gdb';
     print BOCHSRC "clock: sync=", $realtime ? 'realtime' : 'none',
       ", time0=0\n";
     print BOCHSRC "ata1: enabled=1, ioaddr1=0x170, ioaddr2=0x370, irq=15\n"
@@ -573,15 +579,14 @@ EOF
     print_bochs_disk_line ("ata1-master", $disks[2]);
     print_bochs_disk_line ("ata1-slave", $disks[3]);
     if ($vga ne 'terminal') {
-	    if ($serial) {
-	      my $mode = defined ($squish_pty) ? "term" : "file";
-	      print BOCHSRC "com1: enabled=1, mode=$mode, dev=/dev/stdout\n";
-	    }
+	if ($serial) {
+	    my $mode = defined ($squish_pty) ? "term" : "file";
+	    print BOCHSRC "com1: enabled=1, mode=$mode, dev=/dev/stdout\n";
+	}
+	print BOCHSRC "display_library: nogui\n" if $vga eq 'none';
+    } else {
+	print BOCHSRC "display_library: term\n";
     }
-    # always use sdl, since term and x seem to be broken
-    # and nogui not present anymore (at least on Ubuntu 14.04 LTS)
-    print BOCHSRC "display_library: sdl\n";
-
     close (BOCHSRC);
 
     # Compose Bochs command line.
@@ -622,16 +627,23 @@ sub run_qemu {
     my (@cmd) = ('qemu-system-i386');
     push (@cmd, '-device', 'isa-debug-exit');
 
-    push (@cmd, '-hda', $disks[0]) if defined $disks[0];
-    push (@cmd, '-hdb', $disks[1]) if defined $disks[1];
-    push (@cmd, '-hdc', $disks[2]) if defined $disks[2];
-    push (@cmd, '-hdd', $disks[3]) if defined $disks[3];
+    my ($i);
+    for ($i = 0; $i < 4; $i++) {
+	if (defined $disks[$i]) {
+	    push (@cmd, '-drive');
+	    push (@cmd, "file=$disks[$i],format=raw,index=$i,media=disk");
+	}
+    }
+#    push (@cmd, '-hda', $disks[0]) if defined $disks[0];
+#    push (@cmd, '-hdb', $disks[1]) if defined $disks[1];
+#    push (@cmd, '-hdc', $disks[2]) if defined $disks[2];
+#    push (@cmd, '-hdd', $disks[3]) if defined $disks[3];
     push (@cmd, '-m', $mem);
     push (@cmd, '-net', 'none');
     push (@cmd, '-nographic') if $vga eq 'none';
     push (@cmd, '-serial', 'stdio') if $serial && $vga ne 'none';
     push (@cmd, '-S') if $debug eq 'monitor';
-    push (@cmd, '-s', '-S') if $debug eq 'gdb';
+    push (@cmd, '-gdb', "tcp::$gdb_port", '-S') if $debug eq 'gdb';
     push (@cmd, '-monitor', 'null') if $vga eq 'none' && $debug eq 'none';
     run_command (@cmd);
 }
@@ -854,7 +866,7 @@ sub xsystem {
 	alarm (0);
 	&$cleanup ();
 
-	if (WIFSIGNALED ($?) && WTERMSIG ($?) == SIGVTALRM ()) {
+	if (WIFSIGNALED ($?) && WTERMSIG ($?) == SIGVTALRM_number ()) {
 	    seek (STDOUT, 0, 2);
 	    print "\nTIMEOUT after $timeout seconds of host CPU time\n";
 	    exit 0;
@@ -929,15 +941,15 @@ sub exec_setitimer {
     exit (1);
 }
 
-#sub SIGVTALRM {
-#    use Config;
-#    my $i = 0;
-#    foreach my $name (split(' ', $Config{sig_name})) {
-#	return $i if $name eq 'VTALRM';
-#	$i++;
-#    }
-#    return 0;
-#}
+sub SIGVTALRM_number {
+    use Config;
+    my $i = 0;
+    foreach my $name (split(' ', $Config{sig_name})) {
+	return $i if $name eq 'VTALRM';
+	$i++;
+    }
+    return 0;
+}
 
 # find_in_path ($program)
 #
