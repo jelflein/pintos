@@ -18,6 +18,11 @@ struct cache_entry {
     bool dirty;
     bool accessed;
 
+    bool is_evcting;
+
+    bool is_read_head;
+    struct semaphore wating_sema;
+
     bool pinned;
 
     uint32_t lru_timestamp;

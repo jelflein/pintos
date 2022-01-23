@@ -221,6 +221,7 @@ page_fault (struct intr_frame *f)
 
     if (spt_entry->spe_status == mapped_file || spt_entry->spe_status == mapped_file_nowriteback) {
       d_printf("m_file %p \n", (void *) spt_entry->vaddr);
+      set_pinned(frame_pointer);
       // read contents from file into newly allocated frame
       file_seek(spt_entry->file, (int)spt_entry->file_offset);
       // this may block and run another thread in the meantime
@@ -228,6 +229,8 @@ page_fault (struct intr_frame *f)
 
       spt_entry->spe_status = spt_entry->spe_status ==
               mapped_file_nowriteback ? frame : frame_from_file;
+
+      unpin(frame_pointer);
 //      printf("mapping in from file to user vaddr %p of process "
 //             "\"%s\" at frame %p\n", (void*)page_vaddr, t->name, frame_pointer);
     }

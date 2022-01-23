@@ -26,3 +26,4 @@ void frametable_lock(void);
 void frametable_unlock(void);
 
 void set_pinned(void* frame);
+void unpin(void* frame);
