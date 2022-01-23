@@ -102,7 +102,7 @@ static struct cache_entry *cache_create_entry(block_sector_t sector, bool evict,
   e->sector = sector;
   e->dirty = false;
   e->accessed = false;
-  e->pinned = false;
+  e->pinned = 0;
   e->is_read_head = is_read_head;
   e->is_evcting = false;
   lock_init(&e->lock);
@@ -152,7 +152,7 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
                                          elem);
 
       // TODO: Be smart about evicting undirty entries first
-      if (!e->pinned && (lowest_c_entry == NULL
+      if (e->pinned == 0 && (lowest_c_entry == NULL
                          || e->lru_timestamp < lowest_c_entry->lru_timestamp)
                          && !e->is_read_head) {
         lowest_c_entry = e;
@@ -162,7 +162,7 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
     ASSERT(lowest_c_entry != NULL && "Have to find one entry to evict");
     lock_acquire(&lowest_c_entry->lock);
 
-    if (lowest_c_entry->pinned) {
+    if (lowest_c_entry->pinned > 0) {
       lock_release(&lowest_c_entry->lock);
       // restart
       continue;
@@ -173,10 +173,16 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
     if (lowest_c_entry->dirty) {
       //d_printf("Buffercache: evict sector %u to disk\n",
 //               lowest_c_entry->sector);
-      block_write(fs_device, lowest_c_entry->sector, lowest_c_entry->data);
-
       lowest_c_entry->dirty = false;
       lowest_c_entry->lru_timestamp = get_time_since_start();
+
+      block_write(fs_device, lowest_c_entry->sector, lowest_c_entry->data);
+
+      if (lowest_c_entry->pinned > 0) {
+        lock_release(&lowest_c_entry->lock);
+        // restart
+        continue;
+      }
     }
 
     if (!lowest_c_entry->is_evcting)
@@ -215,15 +221,15 @@ static void write_cache_to_disk(void) {
       struct cache_entry *e = hash_entry(hash_cur(&iter), struct cache_entry,
                                          elem);
 
-      if (e->dirty && !e->pinned) {
+      if (e->dirty && e->pinned == 0) {
         at_least_one_dirty = true;
         //d_printf("Buffercache: flushing sector %u to disk\n", e->sector);
-        e->pinned = true;
+        e->pinned++;
         e->dirty = false;
         lock_acquire(&e->lock);
         block_write(fs_device, e->sector, e->data);
         lock_release(&e->lock);
-        e->pinned = false;
+        e->pinned--;
         // we cannot continue iterating after blocking for a while, iterator
         // invalid
         break;
@@ -278,7 +284,7 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
     else c_entry = cache_create_entry(sector, false, false);
 
     ASSERT(c_entry != NULL);
-    c_entry->pinned = true;
+    c_entry->pinned++;
 
     if (sector_ofs != 0 || chunk_size < BLOCK_SECTOR_SIZE) {
       // read whole sector in first
@@ -299,7 +305,7 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
     c_entry->dirty = true;
     c_entry->accessed = true;
     c_entry->lru_timestamp = (uint32_t) get_time_since_start();
-    c_entry->pinned = false;
+    c_entry->pinned--;
 
     lock_release(&c_entry->lock);
 
@@ -310,7 +316,7 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
     sema_down(&c_entry->wating_sema);
   }
 
-  c_entry->pinned = true;
+  c_entry->pinned++;
 
   //in cache
   lock_acquire(&c_entry->lock);
@@ -331,7 +337,7 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
   //assumption c_entry->data is complete loaded
   memcpy(c_entry->data + sector_ofs, buffer, chunk_size);
 
-  c_entry->pinned = false;
+  c_entry->pinned--;
   lock_release(&c_entry->lock);
 }
 
@@ -358,7 +364,7 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
       c_entry = cache_create_entry(sector, false, false);
     }
 
-    c_entry->pinned = true;
+    c_entry->pinned++;
     c_entry->lru_timestamp = (uint32_t) get_time_since_start();
 
     lock_acquire(&c_entry->lock);
@@ -381,7 +387,7 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
       cache_size++;
     }
 
-    c_entry->pinned = false;
+    c_entry->pinned--;
 
     if (sector + 1 < block_size(fs_device) && !is_readahead) {
       enqueue_read_ahead_sector(sector + 1);
@@ -396,16 +402,19 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
     sema_down(&c_entry->wating_sema);
   }
 
-  c_entry->pinned = true;
+  c_entry->pinned++;
 
+  ASSERT(cache_get_entry(sector) != NULL);
   lock_acquire(&c_entry->lock);
+
+  struct cache_entry *debug = cache_get_entry(sector);
   ASSERT(cache_get_entry(sector) != NULL);
 
   c_entry->accessed = true;
   c_entry->lru_timestamp = (uint32_t) get_time_since_start();
 
   memcpy(buffer, c_entry->data + sector_ofs, chunk_size);
-  c_entry->pinned = false;
+  c_entry->pinned--;
 
   lock_release(&c_entry->lock);
 }
@@ -460,6 +469,7 @@ static void enqueue_read_ahead_sector(block_sector_t sector) {
   cache_create_entry(sector, false, true);
 
   if (list_was_empty) {
+    d_printf("up\n");
     sema_up(&read_ahead_queue_not_empty_sema);
   }
 }
@@ -467,8 +477,9 @@ static void enqueue_read_ahead_sector(block_sector_t sector) {
 static _Noreturn void thread_read_ahead(void *aux UNUSED) {
   while (true) {
     if (list_empty(&read_ahead_queue)) {
-      //d_printf("read ahead thread waiting for work\n");
-      ASSERT(read_ahead_queue_not_empty_sema.value == 0);
+      ASSERT(list_size(&read_ahead_queue_not_empty_sema.waiters) == 0);
+      d_printf("down\n");
+
       sema_down(&read_ahead_queue_not_empty_sema);
       //d_printf("read ahead thread woken up. list size %u\n", list_size
       //(&read_ahead_queue));
@@ -490,6 +501,7 @@ static _Noreturn void thread_read_ahead(void *aux UNUSED) {
 
     //after read
     for (uint32_t i = 0; i < list_size(&c_entry->wating_sema.waiters); ++i) {
+      d_printf("up %u\n", i);
       sema_up(&c_entry->wating_sema);
     }
 
