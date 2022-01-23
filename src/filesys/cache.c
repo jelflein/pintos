@@ -60,7 +60,7 @@ void init_cache()
   hash_init(&cache, cache_entry_hash, cache_entries_hash_less, NULL);
 
   thread_create("fs-flush", 0, thread_flush, "system");
-  thread_create("fs-read-ahead", 0, thread_read_ahead, "system");
+//  thread_create("fs-read-ahead", 0, thread_read_ahead, "system");
 
   fs_device = block_get_role (BLOCK_FILESYS);
 

@@ -55,7 +55,8 @@ process_execute(const char *file_name) {
   strlcpy(fn_copy, file_name, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create_options(file_name, PRI_DEFAULT, start_process, fn_copy,
+                              thread_current()->working_directory);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
 

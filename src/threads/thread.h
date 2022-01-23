@@ -125,6 +125,7 @@ struct thread
     struct hash spt;
     bool is_main_thread;
     void *syscall_temp_buffer;
+    char working_directory[128];
 #endif
 
     /* Owned by thread.c. */
@@ -145,6 +146,10 @@ void thread_print_stats (void);
 typedef void thread_func (void *aux);
 tid_t
 thread_create(const char *name, int priority, thread_func *function, void *aux);
+
+tid_t thread_create_options(const char *name, int priority, thread_func
+*function,
+                      void *aux, const char *working_directory);
 
 void thread_block (void);
 void thread_unblock (struct thread *);

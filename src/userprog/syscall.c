@@ -64,6 +64,16 @@ void handler_munmap(struct intr_frame *);
 
 static void handler_exit(int *stack);
 
+static void handler_chdir(struct intr_frame *);
+
+static void handler_mkdir(struct intr_frame *);
+
+static void handler_readdir(struct intr_frame *);
+
+static void handler_isdir(struct intr_frame *);
+
+static void handler_inumber(struct intr_frame *);
+
 void unsync_close_mfile(struct thread *t, struct m_file *m_file);
 
 void close_mfile(struct thread *t, struct m_file *m_file);
@@ -150,6 +160,26 @@ syscall_handler(struct intr_frame *f) {
       handler_munmap(f);
       break;
     }
+    case SYS_CHDIR: {
+      handler_chdir(f);
+      break;
+    }
+//    case SYS_MKDIR: {
+//      handler_mkdir(f);
+//      break;
+//    }
+//    case SYS_READDIR: {
+//      handler_readdir(f);
+//      break;
+//    }
+//    case SYS_ISDIR: {
+//      handler_isdir(f);
+//      break;
+//    }
+//    case SYS_INUMBER: {
+//      handler_inumber(f);
+//      break;
+//    }
     default:
       printf("invalid system call!\n");
       process_terminate(thread_current(), -1, thread_current()->program_name);
@@ -935,3 +965,60 @@ bool fs_lock_held_by_current_thread()
 {
   return lock_held_by_current_thread(&file_sema);
 }
+
+static void handler_chdir(struct intr_frame *f)
+{
+  int *stack = f->esp;
+
+  //args
+  const char *cwd_ptr;
+  readu(stack + 1, sizeof cwd_ptr, &cwd_ptr);
+
+  if (cwd_ptr == NULL) {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
+
+  size_t cwd_length = strlenu((const char *) cwd_ptr);
+  if (cwd_length == 0 || cwd_length > 127) {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
+
+  char cwd[cwd_length + 1];
+  readu(cwd_ptr, sizeof cwd, cwd);
+
+  struct thread *t = thread_current();
+
+  bool ret_val = false;
+
+  if (cwd[0] != '/')
+  {
+    // relative path, unsupported
+  }
+  else {
+    // absolute path
+    memcpy(t->working_directory, cwd, cwd_length + 1);
+    ret_val = true;
+  }
+  f->eax = ret_val;
+}
+
+static void handler_mkdir(struct intr_frame *f)
+{
+
+}
+
+static void handler_readdir(struct intr_frame *f)
+{
+
+}
+
+static void handler_isdir(struct intr_frame *f)
+{
+
+}
+
+static void handler_inumber(struct intr_frame *f)
+{
+
+}
+

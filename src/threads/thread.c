@@ -125,6 +125,9 @@ static bool is_thread(struct thread *)UNUSED;
     //spt_init(&initial_thread->spt);
     initial_thread->is_main_thread = true;
     initial_thread->syscall_temp_buffer = NULL;
+
+    const char root_dir[] = "/";
+    memcpy(initial_thread->working_directory, root_dir, sizeof root_dir);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -190,6 +193,12 @@ thread_print_stats(void) {
    Priority scheduling is the goal of Problem 1-3. */
 tid_t
 thread_create(const char *name, int priority, thread_func *function, void *aux) {
+  return thread_create_options(name, priority, function, aux, NULL);
+}
+
+tid_t
+thread_create_options(const char *name, int priority, thread_func *function,
+                     void *aux, const char *working_directory) {
     struct thread *t;
     struct kernel_thread_frame *kf;
     struct switch_entry_frame *ef;
@@ -246,6 +255,15 @@ thread_create(const char *name, int priority, thread_func *function, void *aux) 
     t->syscall_temp_buffer = palloc_get_page(0);
     if (t->syscall_temp_buffer == NULL)
       return TID_ERROR;
+
+    if (working_directory != NULL)
+    {
+      memcpy(t->working_directory, working_directory,
+             MIN(sizeof t->working_directory, strlen(working_directory) + 1));
+    }
+    else {
+      memset(t->working_directory, 0, sizeof t->working_directory);
+    }
 
     /* Stack frame for switch_entry(). */
     ef = alloc_frame(t, sizeof *ef);
