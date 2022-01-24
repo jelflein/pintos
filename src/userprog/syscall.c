@@ -14,6 +14,8 @@
 #include "filesys/file.h"
 #include <string.h>
 #include <vm/page.h>
+#include <filesys/directory.h>
+#include <filesys/inode.h>
 #include "vm/frame.h"
 #include "pagedir.h"
 
@@ -168,18 +170,18 @@ syscall_handler(struct intr_frame *f) {
 //      handler_mkdir(f);
 //      break;
 //    }
-//    case SYS_READDIR: {
-//      handler_readdir(f);
-//      break;
-//    }
-//    case SYS_ISDIR: {
-//      handler_isdir(f);
-//      break;
-//    }
-//    case SYS_INUMBER: {
-//      handler_inumber(f);
-//      break;
-//    }
+    case SYS_READDIR: {
+      handler_readdir(f);
+      break;
+    }
+    case SYS_ISDIR: {
+      handler_isdir(f);
+      break;
+    }
+    case SYS_INUMBER: {
+      handler_inumber(f);
+      break;
+    }
     default:
       printf("invalid system call!\n");
       process_terminate(thread_current(), -1, thread_current()->program_name);
@@ -536,6 +538,7 @@ void handler_fs_open(struct intr_frame *f) {
 
   fd->descriptor_id = last_id;
   fd->f = file_pointer;
+  fd->is_directory = false;
 
   struct thread *t = thread_current();
   list_push_back(&t->file_descriptors, &fd->list_elem);
@@ -557,7 +560,16 @@ void handler_fs_filesize(struct intr_frame *f) {
   lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
-  if (fd == 0) {
+  if (fd == NULL) {
+    f->eax = -1;
+    lock_release(&file_sema);
+    return;
+  }
+
+  if (fd->is_directory)
+  {
+    // TODO: What should we do in this case? Is it legitimate to call
+    //  filesize on a directory?
     f->eax = -1;
     lock_release(&file_sema);
     return;
@@ -596,7 +608,7 @@ void handler_fs_read(struct intr_frame *f) {
   //lock
   lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
-  if (fd == NULL) {
+  if (fd == NULL || fd->is_directory) {
     lock_release(&file_sema);
     f->eax = -1;
     return;
@@ -652,7 +664,7 @@ void handler_fs_write(struct intr_frame *f) {
   //lock
   lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
-  if (fd == NULL) {
+  if (fd == NULL || fd->is_directory) {
     lock_release(&file_sema);
     f->eax = -1;
     return;
@@ -705,7 +717,7 @@ void handler_fs_seek(struct intr_frame *f) {
   //lock
   lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
-  if (fd == NULL) {
+  if (fd == NULL || fd->is_directory) {
     lock_release(&file_sema);
     return;
   }
@@ -733,7 +745,7 @@ void handler_fs_tell(struct intr_frame *f) {
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
   lock_release(&file_sema);
 
-  if (fd == NULL) {
+  if (fd == NULL || fd->is_directory) {
     f->eax = 0;
     return;
   }
@@ -759,8 +771,14 @@ void handler_fs_close(struct intr_frame *f) {
     return;
   }
 
+  if (fd->is_directory)
+  {
+    dir_close(fd->d);
+  }
+  else {
+    file_close(fd->f);
+  }
 
-  file_close(fd->f);
   //remove from list
   list_remove(&(fd->list_elem));
   lock_release(&file_sema);
@@ -802,7 +820,7 @@ void handler_mmap(struct intr_frame *f) {
   lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
-  if (fd == 0) {
+  if (fd == 0 || fd->is_directory) {
     f->eax = -1;
     lock_release(&file_sema);
     return;
@@ -1009,16 +1027,71 @@ static void handler_mkdir(struct intr_frame *f)
 
 static void handler_readdir(struct intr_frame *f)
 {
+  int *stack = f->esp;
 
+  //args
+  int fd_id;
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+
+  lock_acquire(&file_sema);
+  struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
+  lock_release(&file_sema);
+
+  if (fd == NULL || !fd->is_directory) {
+    f->eax = 0;
+    return;
+  }
+
+  // TODO: Fully implement this
+//  dir_readdir()
+
+
+//  f->eax = fd->f->pos;
 }
 
 static void handler_isdir(struct intr_frame *f)
 {
+  int *stack = f->esp;
 
+  //args
+  int fd_id;
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+
+  lock_acquire(&file_sema);
+  struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
+  lock_release(&file_sema);
+
+  if (fd == NULL) {
+    f->eax = 0;
+    return;
+  }
+
+  f->eax = fd->is_directory;
 }
 
 static void handler_inumber(struct intr_frame *f)
 {
+  int *stack = f->esp;
 
+  //args
+  int fd_id;
+  readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
+
+  lock_acquire(&file_sema);
+  struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
+  lock_release(&file_sema);
+
+  if (fd == NULL) {
+    f->eax = 0;
+    return;
+  }
+
+  if (fd->is_directory)
+  {
+    f->eax = inode_get_sector(dir_get_inode(fd->d));
+  }
+  else {
+    f->eax = inode_get_sector(fd->f->inode);
+  }
 }
 

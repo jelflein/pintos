@@ -21,7 +21,11 @@ bool filesys_remove (const char *name);
 
 struct file_descriptor {
   int descriptor_id;
-  struct file *f;
+  union {
+      struct file *f;
+      struct dir *d;
+  };
+  bool is_directory;
   struct list_elem list_elem;
 };
 
