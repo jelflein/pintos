@@ -141,11 +141,6 @@ static void _delete_entry(struct cache_entry *e) {
   ASSERT(he != NULL);
 }
 
-static void _delete_elem(struct hash_elem *e) {
-  struct hash_elem *he = hash_delete(&cache, e);
-  ASSERT(he != NULL);
-}
-
 static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool create_new) {
   ASSERT(hash_size(&cache) > 0);
 
@@ -199,7 +194,7 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
 
       if (lowest_c_entry->pinned > 0 || lowest_c_entry->is_read_head) {
         lock_release(&lowest_c_entry->lock);
-        // restart
+        lowest_c_entry->is_evcting = false;
         continue;
       }
     }
@@ -249,8 +244,13 @@ static void print_buffer(uint8_t *b, uint32_t length) {
   }
 }
 
+struct write_entry {
+  block_sector_t sector;
+  struct cache_entry *e;
+};
+
 static void write_cache_to_disk(void) {
-  struct cache_entry* data = calloc(64, sizeof(struct cache_entry));
+  struct write_entry* data = calloc(64, sizeof(struct write_entry));
   ASSERT(data != NULL);
 
   struct hash_iterator iter;
@@ -265,8 +265,10 @@ static void write_cache_to_disk(void) {
 
     if (e->dirty && e->pinned == 0 && !e->is_read_head) {
       at_least_one_dirty = true;
-      e->dirty = false;
-      data[j] = *e;
+
+      data[j].sector = e->sector;
+      data[j].e = e;
+
       j++;
     }
   }
@@ -274,9 +276,21 @@ static void write_cache_to_disk(void) {
   if (!at_least_one_dirty) return;
 
   for (int i = 0; i < j; i++) {
-    struct cache_entry e = data[i];
+    struct write_entry e = data[i];
 
-    block_write(fs_device, e.sector, e.data);
+    struct cache_entry *live_entry = cache_get_entry(e.sector);
+
+    if(live_entry == NULL) continue;
+    if(live_entry->is_evcting) continue;
+
+    lock_acquire(&e.e->lock);
+
+    ASSERT(e.e->dirty);
+    e.e->dirty = false;
+
+    block_write(fs_device, e.e->sector, e.e->data);
+
+    lock_release(&e.e->lock);
   }
 
   free(data);
