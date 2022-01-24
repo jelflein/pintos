@@ -18,7 +18,12 @@ struct cache_entry {
     bool dirty;
     bool accessed;
 
-    bool pinned;
+    bool is_evcting;
+
+    bool is_read_head;
+    struct condition read_ahead_waiting;
+
+    uint32_t pinned;
 
     uint32_t lru_timestamp;
 

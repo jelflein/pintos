@@ -169,7 +169,7 @@ page_fault (struct intr_frame *f)
   }
 
   uint32_t page_vaddr = (uint32_t)fault_addr / PGSIZE * PGSIZE;
-  d_printf("vaddr %p\n", (void *) page_vaddr);
+  d_printf("v addr %p\n", (void *) page_vaddr);
 
   frametable_lock();
   struct spt_entry *spt_entry = spt_get_entry(thread_current(), page_vaddr, t
@@ -181,7 +181,7 @@ page_fault (struct intr_frame *f)
   if (spt_entry == NULL
     && (
       // PUSH, CALL or PUSHA instruction may fault 4 or 32 bytes above the stack
-      ((stack_pointer > fault_addr) && ((uint32_t)stack_pointer - (uint32_t)fault_addr <= 32))
+      ((stack_pointer >= fault_addr) && ((uint32_t)stack_pointer - (uint32_t)fault_addr <= 32))
       // faults inside the stack
       || fault_addr > stack_pointer
       )
@@ -193,7 +193,7 @@ page_fault (struct intr_frame *f)
     const uint32_t STACK_PAGE_LIMIT = 192;
     if (stack_page_number > STACK_PAGE_LIMIT)
     {
-      printf("Stack overflow, limit of %u pages enforced\n", STACK_PAGE_LIMIT);
+      printf("Stack doverflow, limit of %u pages enforced\n", STACK_PAGE_LIMIT);
       process_terminate(t, -1, t->program_name);
     }
     // grow stack logic
@@ -221,6 +221,7 @@ page_fault (struct intr_frame *f)
 
     if (spt_entry->spe_status == mapped_file || spt_entry->spe_status == mapped_file_nowriteback) {
       d_printf("m_file %p \n", (void *) spt_entry->vaddr);
+      set_pinned(frame_pointer);
       // read contents from file into newly allocated frame
       file_seek(spt_entry->file, (int)spt_entry->file_offset);
       // this may block and run another thread in the meantime
@@ -228,6 +229,8 @@ page_fault (struct intr_frame *f)
 
       spt_entry->spe_status = spt_entry->spe_status ==
               mapped_file_nowriteback ? frame : frame_from_file;
+
+      unpin(frame_pointer);
 //      printf("mapping in from file to user vaddr %p of process "
 //             "\"%s\" at frame %p\n", (void*)page_vaddr, t->name, frame_pointer);
     }

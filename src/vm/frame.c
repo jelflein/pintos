@@ -223,6 +223,15 @@ void set_pinned(void* frame)
     compute_eviction_score();
 }
 
+void unpin(void* frame)
+{
+  uint32_t index = TABLE_INDEX(frame);
+  struct frame_entry fe = frame_table[index];
+
+  ASSERT(!entry_is_empty(fe));
+  fe.pinned = false;
+}
+
 void compute_eviction_score()
 {
   int32_t smallest_index = -1;
