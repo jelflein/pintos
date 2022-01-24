@@ -1,5 +1,6 @@
 #include "filesys/file.h"
 #include <debug.h>
+#include <stdio.h>
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 
@@ -76,6 +77,11 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
   return inode_read_at (file->inode, buffer, size, file_ofs);
 }
 
+static void file_extend(struct file *file, uint32_t size)
+{
+  inode_extend(file->inode, size);
+}
+
 /* Writes SIZE bytes from BUFFER into FILE,
    starting at the file's current position.
    Returns the number of bytes actually written,
@@ -86,6 +92,12 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
 off_t
 file_write (struct file *file, const void *buffer, off_t size) 
 {
+  if (file->pos + size > file_length(file))
+  {
+    d_printf("Need to extend the file\n");
+    file_extend(file, file->pos + size);
+  }
+
   off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
   file->pos += bytes_written;
   return bytes_written;

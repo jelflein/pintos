@@ -3,6 +3,7 @@
 #include <debug.h>
 #include <round.h>
 #include <string.h>
+#include <stdio.h>
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
@@ -54,6 +55,9 @@ struct inode
   };
 
 
+static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size);
+
+
 bool inode_is_directory(struct inode *i)
 {
   ASSERT(i->data.magic == INODE_MAGIC || i->data.magic ==
@@ -73,11 +77,11 @@ block_sector_t inode_get_sector(struct inode *i)
    Returns -1 if INODE does not contain data for a byte at offset
    POS. */
 static block_sector_t
-byte_to_sector (const struct inode *inode, off_t pos) 
+byte_to_sector (const struct inode *inode, off_t pos)
 {
   ASSERT (inode != NULL);
   if (pos < 0 || pos >= inode->data.length)
-    return -1;
+    return UINT32_MAX;
 
   uint32_t sector_idx = pos / BLOCK_SECTOR_SIZE;
   if (sector_idx < NUM_DIRECT_POINTERS)
@@ -147,117 +151,15 @@ inode_create (block_sector_t sector, off_t length)
   disk_inode = calloc (1, sizeof *disk_inode);
   if (disk_inode != NULL)
   {
-    size_t sectors = bytes_to_sectors (length);
-    disk_inode->length = length;
+    disk_inode->length = 0;
     disk_inode->magic = INODE_MAGIC;
 
-    uint32_t num_disk_sectors = sectors;
-    if (sectors > DIRECT_LIMIT)
-      num_disk_sectors++;
-    if (sectors > INDIRECT_LIMIT)
-      num_disk_sectors += DIV_ROUND_UP(sectors - INDIRECT_LIMIT - 1,
-                                       BLOCK_SECTOR_SIZE) + 1;
-
-
-    // write data blocks to disk
-    static char zeros[BLOCK_SECTOR_SIZE];
-
-    struct inode_disk_pointer_table *indirect_table = NULL;
-    struct inode_disk_pointer_table
-            *double_indirect_tables[MAX_DOUBLE_INDIRECT_TABLES] = {0};
-
-    for (uint32_t i = 0; i < sectors; i++)
-    {
-      block_sector_t current_sector;
-      if (!free_map_allocate (1, &current_sector))
-      {
-        ASSERT(0);
-      }
-      // write data
-      cache_block_write (fs_device, current_sector, zeros);
-
-      // write tables and references
-      if (i < NUM_DIRECT_POINTERS)
-      {
-        disk_inode->direct[i] = current_sector;
-      }
-      else if (i <= INDIRECT_LIMIT)
-      {
-        if (indirect_table == NULL)
-        {
-          indirect_table = malloc(sizeof(struct inode_disk_pointer_table));
-          ASSERT(indirect_table != NULL);
-        }
-        indirect_table->pointers[i - NUM_DIRECT_POINTERS] = current_sector;
-      }
-      else
-      {
-        uint32_t table_id = (i - INDIRECT_LIMIT - 1) / NUM_POINTERS_PER_TABLE;
-        uint32_t in_table_index = (i - INDIRECT_LIMIT - 1) %
-                NUM_POINTERS_PER_TABLE;
-        if (double_indirect_tables[table_id] == NULL)
-        {
-          double_indirect_tables[table_id] = malloc(sizeof(struct inode_disk_pointer_table));
-          ASSERT(double_indirect_tables[table_id] != NULL);
-        }
-
-        double_indirect_tables[table_id]->pointers[in_table_index] =
-                current_sector;
-      }
-    }
-
-
-    // write double indirect pointers
-    struct inode_disk_pointer_table *double_indirect_table_of_tables = NULL;
-    if (double_indirect_tables[0] != NULL)
-    {
-      double_indirect_table_of_tables = malloc(sizeof(struct inode_disk_pointer_table));
-      ASSERT(double_indirect_table_of_tables != NULL);
-    }
-
-    for (uint32_t idx = 0; idx < sizeof double_indirect_tables; idx++)
-    {
-      if (double_indirect_tables[idx] == NULL) break;
-
-      block_sector_t double_indirect_table_sector = 0;
-      if (!free_map_allocate (1, &double_indirect_table_sector))
-      {
-        ASSERT(0);
-      }
-      cache_block_write (fs_device, double_indirect_table_sector,
-                         double_indirect_tables[idx]);
-      double_indirect_table_of_tables->pointers[idx] =
-              double_indirect_table_sector;
-    }
-
-    if (double_indirect_tables[0] != NULL)
-    {
-      block_sector_t double_indirect_table_of_tables_sector = 0;
-      if (!free_map_allocate(1, &double_indirect_table_of_tables_sector))
-      {
-        ASSERT(0);
-      }
-      cache_block_write(fs_device, double_indirect_table_of_tables_sector,
-                        double_indirect_table_of_tables);
-      disk_inode->doubleindirect = double_indirect_table_of_tables_sector;
-    }
-
-    // write indirect table
-    if (indirect_table != NULL)
-    {
-      block_sector_t indirect_table_sector = 0;
-      if (!free_map_allocate (1, &indirect_table_sector))
-      {
-        ASSERT(0);
-      }
-      cache_block_write (fs_device, indirect_table_sector, indirect_table);
-      disk_inode->indirect = indirect_table_sector;
-    }
-
+    success = true;
+    if (length > 0)
+      success = inode_disk_extend(disk_inode, length);
     // write inode to disk
     cache_block_write (fs_device, sector, disk_inode);
 
-    success = true;
     free (disk_inode);
   }
   return success;
@@ -466,6 +368,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     {
       /* Sector to write, starting byte offset within sector. */
       block_sector_t sector_idx = byte_to_sector (inode, offset);
+      ASSERT(sector_idx != UINT32_MAX);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -524,4 +427,161 @@ off_t
 inode_length (const struct inode *inode)
 {
   return inode->data.length;
+}
+
+static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size)
+{
+  ASSERT(disk_inode != NULL);
+  ASSERT(new_size > (uint32_t)disk_inode->length);
+
+  size_t new_sector_num = bytes_to_sectors ((int32_t)new_size);
+  size_t old_sector_num = bytes_to_sectors (disk_inode->length);
+
+  disk_inode->length = (int32_t)new_size;
+  // write data blocks to disk
+  static char zeros[BLOCK_SECTOR_SIZE];
+
+  struct inode_disk_pointer_table *indirect_table = NULL;
+
+  struct inode_disk_pointer_table
+          *double_indirect_tables[MAX_DOUBLE_INDIRECT_TABLES] = {0};
+  struct inode_disk_pointer_table *double_indirect_table_of_tables = NULL;
+  bool has_modified_double_indirect_tables = false;
+
+  for (uint32_t i = old_sector_num; i < new_sector_num; i++)
+  {
+    block_sector_t current_sector;
+    if (!free_map_allocate (1, &current_sector))
+    {
+      ASSERT(0);
+    }
+    // write data
+    cache_block_write (fs_device, current_sector, zeros);
+
+    // write tables and references
+    if (i < NUM_DIRECT_POINTERS)
+    {
+      ASSERT(disk_inode->direct[i] == 0);
+      disk_inode->direct[i] = current_sector;
+    }
+    else if (i <= INDIRECT_LIMIT)
+    {
+      if (indirect_table == NULL)
+      {
+        indirect_table = malloc(sizeof(struct inode_disk_pointer_table));
+        ASSERT(indirect_table != NULL);
+        // check if we already have table on disk
+        if (disk_inode->indirect != 0)
+        {
+          cache_block_read(fs_device, disk_inode->indirect, indirect_table);
+        }
+      }
+      indirect_table->pointers[i - NUM_DIRECT_POINTERS] = current_sector;
+    }
+    else
+    {
+      uint32_t table_id = (i - INDIRECT_LIMIT - 1) / NUM_POINTERS_PER_TABLE;
+      uint32_t in_table_index = (i - INDIRECT_LIMIT - 1) %
+                                NUM_POINTERS_PER_TABLE;
+
+      has_modified_double_indirect_tables = true;
+
+      // check if we already have table of tables on disk
+      if (double_indirect_table_of_tables == NULL &&
+      disk_inode->doubleindirect != 0)
+      {
+        double_indirect_table_of_tables = malloc(sizeof(struct inode_disk_pointer_table));
+        ASSERT(double_indirect_table_of_tables != NULL);
+        cache_block_read(fs_device, disk_inode->doubleindirect,
+                         double_indirect_table_of_tables);
+      }
+
+      if (double_indirect_tables[table_id] == NULL)
+      {
+        double_indirect_tables[table_id] = malloc(sizeof(struct inode_disk_pointer_table));
+        ASSERT(double_indirect_tables[table_id] != NULL);
+        // check if we already have this table on disk
+        if (double_indirect_table_of_tables != NULL &&
+        double_indirect_table_of_tables->pointers[table_id] != 0)
+        {
+          cache_block_read(fs_device, double_indirect_table_of_tables->pointers[table_id],
+                           double_indirect_tables[table_id]);
+        }
+      }
+
+      double_indirect_tables[table_id]->pointers[in_table_index] =
+              current_sector;
+    }
+  }
+
+
+  // write all kinds of tables to disk
+
+  if (has_modified_double_indirect_tables && double_indirect_table_of_tables == NULL)
+  {
+    double_indirect_table_of_tables = malloc(sizeof(struct inode_disk_pointer_table));
+    ASSERT(double_indirect_table_of_tables != NULL);
+  }
+
+  // write double indirect tables to disk
+  for (uint32_t idx = 0; idx < (sizeof(double_indirect_tables)) / (sizeof(
+  double_indirect_tables[0])); idx++)
+  {
+    if (double_indirect_tables[idx] == NULL) continue;
+
+    block_sector_t double_indirect_table_sector = 0;
+    if (double_indirect_table_of_tables != NULL)
+      double_indirect_table_sector =
+              double_indirect_table_of_tables->pointers[idx];
+
+    if (double_indirect_table_sector == 0
+      && !free_map_allocate (1, &double_indirect_table_sector))
+    {
+      ASSERT(0);
+    }
+    cache_block_write (fs_device, double_indirect_table_sector,
+                       double_indirect_tables[idx]);
+    double_indirect_table_of_tables->pointers[idx] =
+            double_indirect_table_sector;
+  }
+
+  // write table of tables to disk
+  if (has_modified_double_indirect_tables)
+  {
+    block_sector_t double_indirect_table_of_tables_sector = disk_inode->doubleindirect;
+    if (double_indirect_table_of_tables_sector == 0
+    && !free_map_allocate(1, &double_indirect_table_of_tables_sector))
+    {
+      ASSERT(0);
+    }
+    cache_block_write(fs_device, double_indirect_table_of_tables_sector,
+                      double_indirect_table_of_tables);
+    disk_inode->doubleindirect = double_indirect_table_of_tables_sector;
+  }
+
+  // write indirect table
+  if (indirect_table != NULL)
+  {
+    block_sector_t indirect_table_sector = disk_inode->indirect;
+    if (indirect_table_sector == 0
+    && !free_map_allocate (1, &indirect_table_sector))
+    {
+      ASSERT(0);
+    }
+    cache_block_write (fs_device, indirect_table_sector, indirect_table);
+    disk_inode->indirect = indirect_table_sector;
+  }
+
+  // writing inode to disk is left to the caller
+
+  return true;
+}
+
+bool inode_extend(struct inode *i, uint32_t new_size)
+{
+  bool success = inode_disk_extend(&i->data, new_size);
+
+  cache_block_write (fs_device, i->sector, &i->data);
+
+  return success;
 }
