@@ -131,15 +131,39 @@ filesys_remove (const char *name)
                                     &containing_dir);
   if (file_or_dir == NULL) return false;
 
+  bool success = false;
+
   if (path_is_dir) {
+    struct dir *d = (struct dir *) file_or_dir;
+
+    // check if dir not empty
+    if (!dir_is_empty(d))
+    {
+      dir_close(d);
+      goto done;
+    }
+
+    // check if attempting to delete the root dir
+    struct dir *root_dir = dir_open_root();
+    if (dir_get_inode(root_dir) == dir_get_inode(d))
+    {
+      dir_close(root_dir);
+      dir_close(d);
+      success = false;
+      goto done;
+    }
+    dir_close(root_dir);
+
+    // check if deleting current working directory
     if (dir_get_inode(thread_current()->working_directory) == dir_get_inode(
-            (struct dir *)file_or_dir))
+            d))
     {
       thread_current()->working_directory = NULL;
       thread_current()->working_directory_deleted = true;
     }
-    dir_close((struct dir *) file_or_dir);
+    dir_close(d);
   }
+  // path points to file
   else {
     file_close((struct file *) file_or_dir);
   }
@@ -147,9 +171,10 @@ filesys_remove (const char *name)
   ASSERT(containing_dir != NULL);
   // remove the entry from the containing directory
   // this will also erase the file itself
-  bool success = dir_remove(containing_dir, last_component);
-  dir_close (containing_dir);
+  success = dir_remove(containing_dir, last_component);
 
+  done:
+  dir_close (containing_dir);
   return success;
 }
 
