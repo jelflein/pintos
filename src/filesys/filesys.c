@@ -132,15 +132,21 @@ filesys_remove (const char *name)
   if (file_or_dir == NULL) return false;
 
   if (path_is_dir) {
-    inode_remove(dir_get_inode((struct dir *) file_or_dir));
+    if (dir_get_inode(thread_current()->working_directory) == dir_get_inode(
+            (struct dir *)file_or_dir))
+    {
+      thread_current()->working_directory = NULL;
+      thread_current()->working_directory_deleted = true;
+    }
     dir_close((struct dir *) file_or_dir);
   }
   else {
-    inode_remove(file_get_inode((struct file *) file_or_dir));
     file_close((struct file *) file_or_dir);
   }
 
   ASSERT(containing_dir != NULL);
+  // remove the entry from the containing directory
+  // this will also erase the file itself
   bool success = dir_remove(containing_dir, last_component);
   dir_close (containing_dir);
 
@@ -188,6 +194,8 @@ void *traverse_path(char *path, bool *is_dir, bool last_component_must_be_null,
     current_dir = dir_open_root();
   else
   {
+    // relative path
+    if (t->working_directory_deleted) goto fail;
     current_dir = t->working_directory ?
                   dir_reopen(t->working_directory) : dir_open_root();
   }

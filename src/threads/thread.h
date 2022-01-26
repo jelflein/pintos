@@ -125,6 +125,7 @@ struct thread
     struct hash spt;
     bool is_main_thread;
     void *syscall_temp_buffer;
+    bool working_directory_deleted;
     struct dir *working_directory;
 #endif
 

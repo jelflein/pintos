@@ -127,7 +127,10 @@ static bool is_thread(struct thread *)UNUSED;
     initial_thread->is_main_thread = true;
     initial_thread->syscall_temp_buffer = NULL;
 
-    initial_thread->working_directory = NULL; //dir_open_root();
+    initial_thread->working_directory_deleted = false;
+    initial_thread->working_directory = NULL;
+    // can't open the root dir, it's too early in the boot process
+    //dir_open_root();
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -256,6 +259,7 @@ thread_create_options(const char *name, int priority, thread_func *function,
     if (t->syscall_temp_buffer == NULL)
       return TID_ERROR;
 
+    t->working_directory_deleted = false;
     t->working_directory = working_directory;
 
     /* Stack frame for switch_entry(). */

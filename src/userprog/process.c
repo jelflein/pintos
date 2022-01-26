@@ -181,7 +181,10 @@ process_exit(void) {
     struct file_descriptor *entry = list_entry(e, struct file_descriptor,
             list_elem);
 
-    file_close(entry->f);
+    if (entry->is_directory)
+      dir_close(entry->d);
+    else
+      file_close(entry->f);
     free(entry);
   }
 

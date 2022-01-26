@@ -1032,6 +1032,7 @@ static void handler_chdir(struct intr_frame *f)
     return;
   }
 
+  t->working_directory_deleted = false;
   t->working_directory = (struct dir *)file_or_dir;
 
   f->eax = true;
@@ -1051,7 +1052,8 @@ static void handler_mkdir(struct intr_frame *f)
 
   size_t cwd_length = strlenu((const char *) dir_ptr);
   if (cwd_length == 0 || cwd_length > 127) {
-    process_terminate(thread_current(), -1, thread_current()->program_name);
+    f->eax = false;
+    return;
   }
 
   char dir_name[cwd_length + 1];
