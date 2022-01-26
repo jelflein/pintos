@@ -72,6 +72,12 @@ block_sector_t inode_get_sector(struct inode *i)
   return i->sector;
 }
 
+off_t inode_get_length(struct inode *i)
+{
+  ASSERT(i != NULL);
+  return i->data.length;
+}
+
 /* Returns the block device sector that contains byte offset POS
    within INODE.
    Returns -1 if INODE does not contain data for a byte at offset
@@ -136,7 +142,7 @@ inode_init (void)
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (block_sector_t sector, off_t length)
+inode_create_options (block_sector_t sector, off_t length, bool dir)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -152,7 +158,7 @@ inode_create (block_sector_t sector, off_t length)
   if (disk_inode != NULL)
   {
     disk_inode->length = 0;
-    disk_inode->magic = INODE_MAGIC;
+    disk_inode->magic = dir ? INODE_MAGIC_DIRECTORY : INODE_MAGIC;
 
     success = true;
     if (length > 0)
@@ -164,6 +170,13 @@ inode_create (block_sector_t sector, off_t length)
   }
   return success;
 }
+
+bool
+inode_create (block_sector_t sector, off_t length)
+{
+  return inode_create_options(sector, length, false);
+}
+
 
 /* Reads an inode from SECTOR
    and returns a `struct inode' that contains it.

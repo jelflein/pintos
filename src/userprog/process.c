@@ -55,8 +55,11 @@ process_execute(const char *file_name) {
   strlcpy(fn_copy, file_name, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create_options(file_name, PRI_DEFAULT, start_process, fn_copy,
-                              thread_current()->working_directory);
+  struct thread *t = thread_current();
+  struct dir *cwd = t->working_directory ?
+                    dir_reopen(t->working_directory) : dir_open_root();
+
+  tid = thread_create_options(file_name, PRI_DEFAULT, start_process, fn_copy,cwd);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
 
@@ -202,6 +205,9 @@ process_exit(void) {
   if (!cur->is_main_thread)
     spt_destroy(&cur->spt);
 
+  // close CWD
+  if (cur->working_directory)
+    dir_close(cur->working_directory);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -327,8 +333,9 @@ load(const char *file_name, void (**eip)(void), void **esp, const char
   process_activate();
 
   /* Open executable file. */
-  file = filesys_open(file_name);
-  if (file == NULL) {
+  bool is_dir;
+  file = filesys_open(file_name, &is_dir);
+  if (file == NULL || is_dir) {
     printf("load: %s: open failed\n", file_name);
     goto done;
   }

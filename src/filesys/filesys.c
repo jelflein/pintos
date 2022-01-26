@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include <threads/thread.h>
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
@@ -45,13 +46,54 @@ filesys_done (void)
 bool
 filesys_create (const char *name, off_t initial_size) 
 {
+  bool is_dir;
+  char *last_component;
+  struct dir *dir = traverse_path(name, &is_dir, true, &last_component, NULL);
+  if (!is_dir || dir == NULL) return false;
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
-  bool success = (dir != NULL
-                  && free_map_allocate (1, &inode_sector)
+
+  d_printf("creating file %s\n", last_component);
+
+  bool success = (free_map_allocate (1, &inode_sector)
                   && inode_create (inode_sector, initial_size)
-                  && dir_add (dir, name, inode_sector));
+                  && dir_add (dir, last_component, inode_sector));
+
   if (!success && inode_sector != 0) 
+    free_map_release (inode_sector, 1);
+  dir_close (dir);
+
+  return success;
+}
+
+/* Creates a file named NAME with the given INITIAL_SIZE.
+   Returns true if successful, false otherwise.
+   Fails if a file named NAME already exists,
+   or if internal memory allocation fails. */
+bool
+filesys_create_dir (const char *name)
+{
+  bool is_dir;
+  char *last_component;
+  struct dir *dir = traverse_path(name, &is_dir, true, &last_component, NULL);
+  if (!is_dir || dir == NULL) return false;
+  block_sector_t inode_sector = 0;
+
+  d_printf("creating directory %s\n", last_component);
+
+  bool success = (free_map_allocate (1, &inode_sector)
+                  && dir_create(inode_sector, 16)
+                  && dir_add (dir, last_component, inode_sector));
+
+  if (success)
+  {
+    // add reference to parent directory
+    struct inode *new_dir_inode = inode_open(inode_sector);
+    struct dir *new_dir = dir_open(new_dir_inode);
+    success &= dir_add(new_dir, "..", inode_get_sector(dir_get_inode(dir)));
+    dir_close(new_dir);
+  }
+
+  if (!success && inode_sector != 0)
     free_map_release (inode_sector, 1);
   dir_close (dir);
 
@@ -63,17 +105,16 @@ filesys_create (const char *name, off_t initial_size)
    otherwise.
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
-struct file *
-filesys_open (const char *name)
+void *
+filesys_open (const char *name, bool *is_dir)
 {
-  struct dir *dir = dir_open_root ();
-  struct inode *inode = NULL;
+  bool path_is_dir;
+  void *file_or_dir = traverse_path(name, &path_is_dir, false, NULL, NULL);
+  if (file_or_dir == NULL) return false;
 
-  if (dir != NULL)
-    dir_lookup (dir, name, &inode);
-  dir_close (dir);
+  *is_dir = path_is_dir;
 
-  return file_open (inode);
+  return file_or_dir;
 }
 
 /* Deletes the file named NAME.
@@ -83,9 +124,25 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir); 
+  bool path_is_dir;
+  struct dir *containing_dir = NULL;
+  char *last_component;
+  void *file_or_dir = traverse_path(name, &path_is_dir, false, &last_component,
+                                    &containing_dir);
+  if (file_or_dir == NULL) return false;
+
+  if (path_is_dir) {
+    inode_remove(dir_get_inode((struct dir *) file_or_dir));
+    dir_close((struct dir *) file_or_dir);
+  }
+  else {
+    inode_remove(file_get_inode((struct file *) file_or_dir));
+    file_close((struct file *) file_or_dir);
+  }
+
+  ASSERT(containing_dir != NULL);
+  bool success = dir_remove(containing_dir, last_component);
+  dir_close (containing_dir);
 
   return success;
 }
@@ -98,6 +155,117 @@ do_format (void)
   free_map_create ();
   if (!dir_create (ROOT_DIR_SECTOR, 16))
     PANIC ("root directory creation failed");
+
+  // add reference to "parent" directory
+  struct inode *new_dir_inode = inode_open(ROOT_DIR_SECTOR);
+  struct dir *new_dir = dir_open(new_dir_inode);
+  if (!dir_add(new_dir, "..", inode_get_sector(new_dir_inode)))
+    PANIC("Failed to add parent dir to root dir");
+
+  dir_close(new_dir);
+
   free_map_close ();
   printf ("done.\n");
+}
+
+void *traverse_path(char *path, bool *is_dir, bool last_component_must_be_null,
+                    char **last_component, struct dir **containing_dir)
+{
+  uint32_t path_length = strlen(path);
+  if (path_length == 0) return NULL;
+
+  bool should_end_with_dir = path[path_length] == '/';
+  bool last_component_does_not_exist = false;
+
+  bool current_is_dir = true;
+  struct file *current_file = NULL;
+  struct dir *current_dir = NULL;
+
+  struct dir *previous_dir = NULL;
+
+  struct thread *t = thread_current();
+  if (path[0] == '/')
+    current_dir = dir_open_root();
+  else
+  {
+    current_dir = t->working_directory ?
+                  dir_reopen(t->working_directory) : dir_open_root();
+  }
+
+  ASSERT(current_dir != NULL);
+  char *token, *save_ptr;
+  for (token = strtok_r (path, "/", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+  {
+    if (last_component_does_not_exist) goto fail;
+
+    d_printf ("traversing '%s'\n", token);
+
+
+    // check for . special case no-op
+    if (strcmp(token, ".") == 0)
+    {
+      if (!current_is_dir) goto fail;
+      continue;
+    }
+
+    // if we encountered a file last, abort
+    if (!current_is_dir) goto fail;
+
+    if (last_component) *last_component = token;
+
+    // traverse next directory
+    struct inode *inode;
+    if (dir_lookup(current_dir, token, &inode))
+    {
+      current_is_dir = inode_is_directory(inode);
+      if (current_is_dir)
+      {
+        if (current_file) file_close(current_file);
+        current_file = NULL;
+        if (current_dir) {
+          if (previous_dir) dir_close(previous_dir);
+          previous_dir = current_dir;
+        }
+        current_dir = dir_open(inode);
+      }
+      else
+      {
+        if (current_file) file_close(current_file);
+        current_file = file_open(inode);
+        if (current_dir) {
+          if (previous_dir) dir_close(previous_dir);
+          previous_dir = current_dir;
+        }
+        current_dir = NULL;
+      }
+    }
+    // file "token" does not exist
+    else
+    {
+      last_component_does_not_exist = true;
+      if (!last_component_must_be_null)
+      {
+        goto fail;
+      }
+    }
+  }
+
+  if (should_end_with_dir && last_component_does_not_exist) goto fail;
+
+  if (should_end_with_dir && !current_is_dir) goto fail;
+
+  if (last_component_must_be_null && !last_component_does_not_exist) goto fail;
+
+  *is_dir = current_is_dir;
+  if (containing_dir) *containing_dir = previous_dir;
+  else if (previous_dir) dir_close(previous_dir);
+  return current_is_dir ? (void*)current_dir : (void*)current_file;
+
+  fail:
+  if (current_file) file_close(current_file);
+  current_file = NULL;
+  if (current_dir) dir_close(current_dir);
+  current_dir = NULL;
+  return NULL;
 }

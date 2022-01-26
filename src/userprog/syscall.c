@@ -166,10 +166,10 @@ syscall_handler(struct intr_frame *f) {
       handler_chdir(f);
       break;
     }
-//    case SYS_MKDIR: {
-//      handler_mkdir(f);
-//      break;
-//    }
+    case SYS_MKDIR: {
+      handler_mkdir(f);
+      break;
+    }
     case SYS_READDIR: {
       handler_readdir(f);
       break;
@@ -509,13 +509,24 @@ void handler_fs_open(struct intr_frame *f) {
   readu(file_name_pointer, sizeof file, file);
   readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
 
+  struct file *file_pointer = NULL;
+  struct dir *dir_pointer = NULL;
+
   //lock
   lock_acquire(&file_sema);
-  struct file *file_pointer = filesys_open(file);
+
+  bool is_dir;
+  void *ptr = filesys_open(file, &is_dir);
+  if (is_dir)
+    dir_pointer = ptr;
+  else
+    file_pointer = ptr;
+
+
   lock_release(&file_sema);
 
   //fail open failed
-  if (file_pointer == 0) {
+  if (file_pointer == NULL && dir_pointer == NULL) {
     f->eax = -1;
     return;
   }
@@ -537,8 +548,12 @@ void handler_fs_open(struct intr_frame *f) {
   }
 
   fd->descriptor_id = last_id;
-  fd->f = file_pointer;
-  fd->is_directory = false;
+  ASSERT(file_pointer != NULL || dir_pointer != NULL);
+  if (file_pointer != NULL)
+    fd->f = file_pointer;
+  else
+    fd->d = dir_pointer;
+  fd->is_directory = dir_pointer != NULL;
 
   struct thread *t = thread_current();
   list_push_back(&t->file_descriptors, &fd->list_elem);
@@ -1008,21 +1023,41 @@ static void handler_chdir(struct intr_frame *f)
 
   bool ret_val = false;
 
-  if (cwd[0] != '/')
+  bool is_dir = false;
+  void *file_or_dir = traverse_path(cwd, &is_dir, false, NULL, NULL);
+  if (!is_dir || !file_or_dir)
   {
-    // relative path, unsupported
+    if (file_or_dir) file_close((struct file *)file_or_dir);
+    f->eax = ret_val;
+    return;
   }
-  else {
-    // absolute path
-    memcpy(t->working_directory, cwd, cwd_length + 1);
-    ret_val = true;
-  }
-  f->eax = ret_val;
+
+  t->working_directory = (struct dir *)file_or_dir;
+
+  f->eax = true;
 }
 
 static void handler_mkdir(struct intr_frame *f)
 {
+  int *stack = f->esp;
 
+  //args
+  const char *dir_ptr;
+  readu(stack + 1, sizeof dir_ptr, &dir_ptr);
+
+  if (dir_ptr == NULL) {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
+
+  size_t cwd_length = strlenu((const char *) dir_ptr);
+  if (cwd_length == 0 || cwd_length > 127) {
+    process_terminate(thread_current(), -1, thread_current()->program_name);
+  }
+
+  char dir_name[cwd_length + 1];
+  readu(dir_ptr, sizeof dir_name, dir_name);
+
+  f->eax = filesys_create_dir(dir_name);
 }
 
 static void handler_readdir(struct intr_frame *f)
@@ -1033,6 +1068,9 @@ static void handler_readdir(struct intr_frame *f)
   int fd_id;
   readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
+  void *name;
+  readu((const void *) (stack + 2), sizeof(name), &name);
+
   lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
   lock_release(&file_sema);
@@ -1042,11 +1080,16 @@ static void handler_readdir(struct intr_frame *f)
     return;
   }
 
-  // TODO: Fully implement this
-//  dir_readdir()
+  char item[READDIR_MAX_LEN + 1];
 
+  bool success = false;
+  do {
+    success = dir_readdir(fd->d, item);
+  } while (success && strcmp(item, "..") == 0);
 
-//  f->eax = fd->f->pos;
+  f->eax = success;
+  if (success)
+    writeu(item, strlen(item) + 1, name);
 }
 
 static void handler_isdir(struct intr_frame *f)

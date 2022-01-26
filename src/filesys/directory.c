@@ -26,7 +26,8 @@ struct dir_entry
 bool
 dir_create (block_sector_t sector, size_t entry_cnt)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry));
+  return inode_create_options(sector, entry_cnt * sizeof (struct
+  dir_entry),true);
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -172,6 +173,12 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   e.in_use = true;
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
+
+  if (ofs + sizeof e > (uint32_t)inode_get_length(dir->inode))
+  {
+    inode_extend(dir->inode, ofs + sizeof e);
+  }
+
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
  done:
