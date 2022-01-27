@@ -144,7 +144,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 {
   struct dir_entry e;
   off_t ofs;
-  bool success = false;
+  bool success = true;
 
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
@@ -174,12 +174,14 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
 
+  // do we need to grow the dir to make place for this entry?
   if (ofs + sizeof e > (uint32_t)inode_get_length(dir->inode))
   {
-    inode_extend(dir->inode, ofs + sizeof e);
+    success = inode_extend(dir->inode, ofs + sizeof e);
   }
 
-  success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
+  if (success)
+    success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
  done:
   return success;
@@ -249,7 +251,8 @@ bool dir_is_empty(struct dir *dir)
   while (inode_read_at (dir->inode, &e, sizeof e, pos) == sizeof e)
   {
     pos += sizeof e;
-    if (e.in_use)
+    // ignore empty entries and special .. entry
+    if (e.in_use && strcmp("..", e.name) != 0)
     {
       return false;
     }

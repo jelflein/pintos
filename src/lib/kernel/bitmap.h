@@ -31,6 +31,7 @@ bool bitmap_contains (const struct bitmap *, size_t start, size_t cnt, bool);
 bool bitmap_any (const struct bitmap *, size_t start, size_t cnt);
 bool bitmap_none (const struct bitmap *, size_t start, size_t cnt);
 bool bitmap_all (const struct bitmap *, size_t start, size_t cnt);
+bool bitmap_at_least_count (const struct bitmap *b, size_t cnt, bool value);
 
 /* Finding set or unset bits. */
 #define BITMAP_ERROR SIZE_MAX

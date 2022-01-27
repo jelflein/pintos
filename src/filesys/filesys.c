@@ -227,8 +227,9 @@ void *traverse_path(char *path, bool *is_dir, bool last_component_must_be_null,
 
   ASSERT(current_dir != NULL);
   char *token, *save_ptr;
-  for (token = strtok_r (path, "/", &save_ptr); token != NULL;
-       token = strtok_r (NULL, " ", &save_ptr))
+  char *path_separator = "/";
+  for (token = strtok_r (path, path_separator, &save_ptr); token != NULL;
+       token = strtok_r (NULL, path_separator, &save_ptr))
   {
     if (last_component_does_not_exist) goto fail;
 

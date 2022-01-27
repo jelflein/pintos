@@ -227,3 +227,9 @@ fsutil_append (char **argv)
   file_close (src);
   free (buffer);
 }
+
+/*
+ * //start/dir0/file1: open failed
+//start/dir0/dir1: open failed
+
+ */

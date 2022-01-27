@@ -245,6 +245,27 @@ bitmap_count (const struct bitmap *b, size_t start, size_t cnt, bool value)
   return value_cnt;
 }
 
+/* Returns the number of bits in B between START and START + CNT,
+   exclusive, that are set to VALUE. */
+bool
+bitmap_at_least_count (const struct bitmap *b, size_t cnt, bool value)
+{
+  size_t i, value_cnt;
+
+  ASSERT (b != NULL);
+  ASSERT (cnt <= b->bit_cnt);
+
+  value_cnt = 0;
+  for (i = 0; i < b->bit_cnt; i++)
+  {
+    if (bitmap_test(b, i) == value)
+      value_cnt++;
+    if (value_cnt == cnt)
+      return true;
+  }
+  return false;
+}
+
 /* Returns true if any bits in B between START and START + CNT,
    exclusive, are set to VALUE, and false otherwise. */
 bool

@@ -99,6 +99,8 @@ static bool cache_has_space_available(void) {
 }
 
 static struct cache_entry *cache_create_entry(block_sector_t sector, bool evict, bool is_read_head) {
+  ASSERT(sector < 4096);
+
   d_printf("100 %u %u %u\n", sector, evict, is_read_head);
 
   ASSERT(cache_has_space_available() || evict || is_read_head);
@@ -166,7 +168,7 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
       // TODO: Be smart about evicting undirty entries first
       if (e->pinned == 0 && (lowest_c_entry == NULL
                          || e->lru_timestamp < lowest_c_entry->lru_timestamp)
-                         && !e->is_read_head) {
+                         && !e->is_read_head && !e->is_evcting) {
         lowest_c_entry = e;
       }
     }
@@ -178,7 +180,8 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
 
     ASSERT(lowest_c_entry != NULL);
 
-    if (lowest_c_entry->pinned != 0 || lowest_c_entry->is_read_head) {
+    if (lowest_c_entry->pinned != 0 || lowest_c_entry->is_read_head
+    || lowest_c_entry->is_evcting) {
       lock_release(&lowest_c_entry->lock);
       // restart
       continue;
@@ -201,20 +204,15 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
       }
     }
 
-    if (!lowest_c_entry->is_evcting)
-      {
-      d_printf("evcting recovery\n");
-      continue;
-    }
-
-    lock_release(&lowest_c_entry->lock);
-    lock_release(&eviction_lock);
-
     d_printf("cache size %u %u\n", cache_size, lowest_c_entry->is_read_head);
     ASSERT(cache_get_entry(lowest_c_entry->sector) != NULL);
     ASSERT(lowest_c_entry->pinned == 0);
     _delete_entry(lowest_c_entry);
     ASSERT(lowest_c_entry->pinned == 0);
+
+    lock_release(&lowest_c_entry->lock);
+    lock_release(&eviction_lock);
+
     d_printf("cache size %u\n", cache_size);
 
     ASSERT(!cache_get_entry(lowest_c_entry->sector));
@@ -267,9 +265,10 @@ static void write_cache_to_disk(void) {
     struct cache_entry *e = hash_entry(hash_cur(&iter), struct cache_entry,
                                        elem);
 
-    if (e->dirty && e->pinned == 0 && !e->is_read_head) {
+    if (e->dirty && e->pinned == 0 && !e->is_read_head && !e->is_evcting) {
       at_least_one_dirty = true;
 
+      //ASSERT(e->sector < 4096);
       data[j].sector = e->sector;
       data[j].e = e;
 
@@ -277,7 +276,11 @@ static void write_cache_to_disk(void) {
     }
   }
 
-  if (!at_least_one_dirty) return;
+  if (!at_least_one_dirty)
+  {
+    free(data);
+    return;
+  }
 
   for (int i = 0; i < j; i++) {
     struct write_entry e = data[i];
@@ -286,14 +289,22 @@ static void write_cache_to_disk(void) {
 
     if(live_entry == NULL) continue;
     if(live_entry->is_evcting) continue;
+    if(live_entry->is_read_head) continue;
 
     lock_acquire(&e.e->lock);
 
-    if(live_entry->is_read_head) continue;
-    if(!live_entry->dirty) continue;
+    if(!live_entry->dirty)
+    {
+      lock_release(&e.e->lock);
+      continue;
+    }
+
     e.e->dirty = false;
+    e.e->pinned++;
 
     block_write(fs_device, e.e->sector, e.e->data);
+
+    e.e->pinned--;
 
     lock_release(&e.e->lock);
   }

@@ -1032,6 +1032,9 @@ static void handler_chdir(struct intr_frame *f)
     return;
   }
 
+  if (t->working_directory != NULL && !t->working_directory_deleted)
+    dir_close(t->working_directory);
+
   t->working_directory_deleted = false;
   t->working_directory = (struct dir *)file_or_dir;
 

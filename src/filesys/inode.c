@@ -160,11 +160,14 @@ inode_create_options (block_sector_t sector, off_t length, bool dir)
     disk_inode->length = 0;
     disk_inode->magic = dir ? INODE_MAGIC_DIRECTORY : INODE_MAGIC;
 
-    success = true;
-    if (length > 0)
-      success = inode_disk_extend(disk_inode, length);
-    // write inode to disk
-    cache_block_write (fs_device, sector, disk_inode);
+	success = true;
+	if (length > 0)
+	  success = inode_disk_extend(disk_inode, length);
+	if (success)
+	{
+	  // write inode to disk
+	  cache_block_write (fs_device, sector, disk_inode);
+	}
 
     free (disk_inode);
   }
@@ -442,6 +445,22 @@ inode_length (const struct inode *inode)
   return inode->data.length;
 }
 
+static uint32_t required_sectors_for_data_sectors(uint32_t data_sectors)
+{
+  uint32_t ret = data_sectors;
+  if (data_sectors > NUM_DIRECT_POINTERS)
+	ret++; // indirect table
+  if (data_sectors > NUM_DIRECT_POINTERS + NUM_POINTERS_PER_TABLE)
+  {
+	uint32_t num_double_indirect_sectors = data_sectors - NUM_DIRECT_POINTERS
+			- NUM_POINTERS_PER_TABLE;
+	ret++; // table of tables
+	ret += DIV_ROUND_UP(num_double_indirect_sectors, NUM_POINTERS_PER_TABLE);
+  }
+
+  return ret;
+}
+
 static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size)
 {
   ASSERT(disk_inode != NULL);
@@ -449,6 +468,14 @@ static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size)
 
   size_t new_sector_num = bytes_to_sectors ((int32_t)new_size);
   size_t old_sector_num = bytes_to_sectors (disk_inode->length);
+
+  size_t num_sectors_to_allocate = required_sectors_for_data_sectors(new_sector_num)
+		  - required_sectors_for_data_sectors(old_sector_num);
+
+  if (!free_map_has_enough_space(num_sectors_to_allocate))
+  {
+	return false;
+  }
 
   disk_inode->length = (int32_t)new_size;
   // write data blocks to disk
@@ -471,56 +498,58 @@ static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size)
     // write data
     cache_block_write (fs_device, current_sector, zeros);
 
-    // write tables and references
-    if (i < NUM_DIRECT_POINTERS)
-    {
-      ASSERT(disk_inode->direct[i] == 0);
-      disk_inode->direct[i] = current_sector;
-    }
-    else if (i <= INDIRECT_LIMIT)
-    {
-      if (indirect_table == NULL)
-      {
-        indirect_table = malloc(sizeof(struct inode_disk_pointer_table));
-        ASSERT(indirect_table != NULL);
-        // check if we already have table on disk
-        if (disk_inode->indirect != 0)
-        {
-          cache_block_read(fs_device, disk_inode->indirect, indirect_table);
-        }
-      }
-      indirect_table->pointers[i - NUM_DIRECT_POINTERS] = current_sector;
-    }
-    else
-    {
-      uint32_t table_id = (i - INDIRECT_LIMIT - 1) / NUM_POINTERS_PER_TABLE;
-      uint32_t in_table_index = (i - INDIRECT_LIMIT - 1) %
-                                NUM_POINTERS_PER_TABLE;
+	// write tables and references
+	if (i < NUM_DIRECT_POINTERS)
+	{
+	  ASSERT(disk_inode->direct[i] == 0);
+	  disk_inode->direct[i] = current_sector;
+	}
+	else if (i <= INDIRECT_LIMIT)
+	{
+	  if (indirect_table == NULL)
+	  {
+		indirect_table = calloc(1, sizeof(struct inode_disk_pointer_table));
+		ASSERT(indirect_table != NULL);
+		// check if we already have table on disk
+		if (disk_inode->indirect != 0)
+		{
+		  cache_block_read(fs_device, disk_inode->indirect, indirect_table);
+		}
+	  }
+	  indirect_table->pointers[i - NUM_DIRECT_POINTERS] = current_sector;
+	}
+	else
+	{
+	  uint32_t table_id = (i - INDIRECT_LIMIT - 1) / NUM_POINTERS_PER_TABLE;
+	  uint32_t in_table_index = (i - INDIRECT_LIMIT - 1) %
+								NUM_POINTERS_PER_TABLE;
 
       has_modified_double_indirect_tables = true;
 
-      // check if we already have table of tables on disk
-      if (double_indirect_table_of_tables == NULL &&
-      disk_inode->doubleindirect != 0)
-      {
-        double_indirect_table_of_tables = malloc(sizeof(struct inode_disk_pointer_table));
-        ASSERT(double_indirect_table_of_tables != NULL);
-        cache_block_read(fs_device, disk_inode->doubleindirect,
-                         double_indirect_table_of_tables);
-      }
+	  // check if we already have table of tables on disk
+	  if (double_indirect_table_of_tables == NULL &&
+	  disk_inode->doubleindirect != 0)
+	  {
+		double_indirect_table_of_tables = calloc(1, sizeof(struct
+				inode_disk_pointer_table));
+		ASSERT(double_indirect_table_of_tables != NULL);
+		cache_block_read(fs_device, disk_inode->doubleindirect,
+						 double_indirect_table_of_tables);
+	  }
 
-      if (double_indirect_tables[table_id] == NULL)
-      {
-        double_indirect_tables[table_id] = malloc(sizeof(struct inode_disk_pointer_table));
-        ASSERT(double_indirect_tables[table_id] != NULL);
-        // check if we already have this table on disk
-        if (double_indirect_table_of_tables != NULL &&
-        double_indirect_table_of_tables->pointers[table_id] != 0)
-        {
-          cache_block_read(fs_device, double_indirect_table_of_tables->pointers[table_id],
-                           double_indirect_tables[table_id]);
-        }
-      }
+	  if (double_indirect_tables[table_id] == NULL)
+	  {
+		double_indirect_tables[table_id] = calloc(1, sizeof(struct
+				inode_disk_pointer_table));
+		ASSERT(double_indirect_tables[table_id] != NULL);
+		// check if we already have this table on disk
+		if (double_indirect_table_of_tables != NULL &&
+		double_indirect_table_of_tables->pointers[table_id] != 0)
+		{
+		  cache_block_read(fs_device, double_indirect_table_of_tables->pointers[table_id],
+						   double_indirect_tables[table_id]);
+		}
+	  }
 
       double_indirect_tables[table_id]->pointers[in_table_index] =
               current_sector;
@@ -532,8 +561,9 @@ static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size)
 
   if (has_modified_double_indirect_tables && double_indirect_table_of_tables == NULL)
   {
-    double_indirect_table_of_tables = malloc(sizeof(struct inode_disk_pointer_table));
-    ASSERT(double_indirect_table_of_tables != NULL);
+	double_indirect_table_of_tables = calloc(1, sizeof(struct
+			inode_disk_pointer_table));
+	ASSERT(double_indirect_table_of_tables != NULL);
   }
 
   // write double indirect tables to disk
@@ -593,8 +623,8 @@ static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size)
 bool inode_extend(struct inode *i, uint32_t new_size)
 {
   bool success = inode_disk_extend(&i->data, new_size);
-
-  cache_block_write (fs_device, i->sector, &i->data);
+  if (success)
+	cache_block_write (fs_device, i->sector, &i->data);
 
   return success;
 }
