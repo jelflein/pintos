@@ -42,6 +42,30 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
+
+struct read_writer_lock
+{
+  bool active_atomic;
+  bool is_atomic;
+
+  uint32_t active_readers;
+  uint32_t active_writers;
+
+  struct lock mutex;
+
+  struct condition waiting_readers;
+  struct condition waiting_writers;
+  struct condition waiting_atomic;
+};
+
+void acquire_read(struct read_writer_lock *read_writer_lock);
+void acquire_write(struct read_writer_lock *read_writer_lock);
+void acquire_atomic(struct read_writer_lock *read_writer_lock);
+
+void release_read(struct read_writer_lock *read_writer_lock);
+void release_write(struct read_writer_lock *read_writer_lock);
+void release_atomic(struct read_writer_lock *read_writer_lock);
+
 /* Optimization barrier.
 
    The compiler will not reorder operations across an
