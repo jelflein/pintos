@@ -31,6 +31,8 @@ static struct list read_ahead_queue;
 static struct semaphore read_ahead_sema;
 static struct semaphore read_ahead_queue_not_empty_sema;
 
+static bool disable_read_ahead = false;
+
 struct read_ahead_entry {
   struct list_elem list_elem;
   block_sector_t sector;
@@ -76,7 +78,7 @@ void init_cache() {
   sema_init(&read_ahead_queue_not_empty_sema, 0);
 
   thread_create("fs-flush", 0, thread_flush, "system");
-  thread_create("fs-read-ahead", 0, thread_read_ahead, "system");
+  if(!disable_read_ahead) thread_create("fs-read-ahead", 0, thread_read_ahead, "system");
 }
 
 static struct cache_entry *cache_get_entry(block_sector_t sector) {
@@ -176,7 +178,7 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
 
     ASSERT(lowest_c_entry != NULL);
 
-    if (lowest_c_entry->pinned > 0 || lowest_c_entry->is_read_head) {
+    if (lowest_c_entry->pinned != 0 || lowest_c_entry->is_read_head) {
       lock_release(&lowest_c_entry->lock);
       // restart
       continue;
@@ -192,7 +194,7 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
 
       block_write(fs_device, lowest_c_entry->sector, lowest_c_entry->data);
 
-      if (lowest_c_entry->pinned > 0 || lowest_c_entry->is_read_head) {
+      if (lowest_c_entry->pinned != 0 || lowest_c_entry->is_read_head) {
         lock_release(&lowest_c_entry->lock);
         lowest_c_entry->is_evcting = false;
         continue;
@@ -209,11 +211,13 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
     lock_release(&eviction_lock);
 
     d_printf("cache size %u %u\n", cache_size, lowest_c_entry->is_read_head);
+    ASSERT(cache_get_entry(lowest_c_entry->sector) != NULL);
+    ASSERT(lowest_c_entry->pinned == 0);
     _delete_entry(lowest_c_entry);
+    ASSERT(lowest_c_entry->pinned == 0);
     d_printf("cache size %u\n", cache_size);
 
     ASSERT(!cache_get_entry(lowest_c_entry->sector));
-
 
     d_printf("finsih evicut %u\n", lowest_c_entry->sector);
 
@@ -285,7 +289,8 @@ static void write_cache_to_disk(void) {
 
     lock_acquire(&e.e->lock);
 
-    ASSERT(e.e->dirty);
+    if(live_entry->is_read_head) continue;
+    if(!live_entry->dirty) continue;
     e.e->dirty = false;
 
     block_write(fs_device, e.e->sector, e.e->data);
@@ -536,6 +541,7 @@ static bool is_in_queue(block_sector_t sector) {
 }
 
 static void enqueue_read_ahead_sector(block_sector_t sector) {
+  if(disable_read_ahead) return;
   struct cache_entry *c_entry = cache_get_entry(sector);
 
   if (c_entry != NULL && c_entry->is_evcting)
