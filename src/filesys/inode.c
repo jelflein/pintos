@@ -29,6 +29,8 @@ struct inode_disk
     block_sector_t indirect;
     block_sector_t doubleindirect;
   };
+//(124 + 1*128 + 1*128*128) sectors
+// max file size = (124 + 1*128 + 1*128*128) * 512 Byte = 8.5MB
 
 struct inode_disk_pointer_table
 {
