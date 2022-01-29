@@ -1,0 +1,281 @@
+		     +-------------------------+
+		     |            OS           |
+		     | PROJECT 4: FILE SYSTEMS |
+		     |     DESIGN DOCUMENT     |
+		     +-------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Jonas Elflein <jonase@coli.uni-saarland.de> 7003378
+Benno Krauß <bekr00003@stud.uni-saarland.de> 7009640
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+We use VM.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+Nothing
+
+		     INDEXED AND EXTENSIBLE FILES
+		     ============================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+#define MAX_DOUBLE_INDIRECT_TABLES 128
+#define NUM_POINTERS_PER_TABLE 128
+#define NUM_DIRECT_POINTERS 124
+#define DIRECT_LIMIT (NUM_DIRECT_POINTERS - 1)
+#define INDIRECT_LIMIT (NUM_POINTERS_PER_TABLE + DIRECT_LIMIT)
+
+
+struct inode_disk
+  {
+    off_t length;                       // unchanged
+    unsigned magic;                     // used to distinguish between files and directories on disk
+    block_sector_t direct[NUM_DIRECT_POINTERS]; // points to 124 data sectors
+    block_sector_t indirect; // points to indirect table
+    block_sector_t doubleindirect; // points to table of tables
+  };
+
+struct inode_disk_pointer_table // used for indirect table, table of tables and double indirect tables
+{
+    block_sector_t pointers[NUM_POINTERS_PER_TABLE];
+};
+
+struct inode
+{
+…
+   struct lock extend_lock; // lock for extending the file
+};
+
+
+
+>> A2: What is the maximum size of a file supported by your inode
+>> structure?  Show your work.
+The max file size is file_max = (124 + 1*128 + 1*128*128) * 512 Byte = 8.518MB
+
+This uses the 124 direct sectors, the 128 single indirect sectors and the 128^2 double indirect sectors.
+
+
+---- SYNCHRONIZATION ----
+
+>> A3: Explain how your code avoids a race if two processes attempt to
+>> extend a file at the same time.
+struct inode has a lock extend_lock, which is acquired when extending a file. Therefore only one thread can extend a file at any given time.
+
+>> A4: Suppose processes A and B both have file F open, both
+>> positioned at end-of-file.  If A reads and B writes F at the same
+>> time, A may read all, part, or none of what B writes.  However, A
+>> may not read data other than what B writes, e.g. if B writes
+>> nonzero data, A is not allowed to see all zeros.  Explain how your
+>> code avoids this race.
+??????????????????????????????????????????????
+
+>> A5: Explain how your synchronization design provides "fairness".
+>> File access is "fair" if readers cannot indefinitely block writers
+>> or vice versa.  That is, many processes reading from a file cannot
+>> prevent forever another process from writing the file, and many
+>> processes writing to a file cannot prevent another process forever
+>> from reading the file.
+???
+
+---- RATIONALE ----
+
+>> A6: Is your inode structure a multilevel index?  If so, why did you
+>> choose this particular combination of direct, indirect, and doubly
+>> indirect blocks?  If not, why did you choose an alternative inode
+>> structure, and what advantages and disadvantages does your
+>> structure have, compared to a multilevel index?
+We chose the multilevel index structure because it seems appropriate. We use direct, indirect and double indirect sectors because that is the minimum that is needed to reach the 8MB file size requirement, because one sector/table can hold at most 128 sector pointers.
+			    SUBDIRECTORIES
+			    ==============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+#define INODE_MAGIC 0x494e4f44 // magic of file inode on disk
+#define INODE_MAGIC_DIRECTORY 0x494e4f43 // magic of directory inode on disk
+
+struct dir {
+    …
+    struct lock lock;
+    …
+}
+
+
+---- ALGORITHMS ----
+
+>> B2: Describe your code for traversing a user-specified path.  How
+>> do traversals of absolute and relative paths differ?
+We created a function traverse_path in filesys.c.
+It tokenizes the path with strtok_r and reads directory entry after directory entry, going along the file path string. A path component "." is a no-op. The parent directory reference ".." is an actual directory entry in our implementation, which is created during the construction of a directory.
+There are a couple of special cases for returning the containing directory of a file/dir for deletion and creation purposes.
+The function returns the file or directory and the end of the path if it exists, along with some auxiliary information.
+
+Relative and absolute path traversals differ only in the starting directory. We set the start directory to either the root dir or the process' current working dir.
+
+---- SYNCHRONIZATION ----
+
+>> B4: How do you prevent races on directory entries?  For example,
+>> only one of two simultaneous attempts to remove a single file
+>> should succeed, as should only one of two simultaneous attempts to
+>> create a file with the same name, and so on.
+
+We explicitly lock directories. Every directory has its own lock which is used as a monitor lock in dir_add, dir_remove, dir_is_empty and so on. This way there can be no race conditions when two threads try to modify the same directory. Different directories may still be modified concurrently.
+
+>> B5: Does your implementation allow a directory to be removed if it
+>> is open by a process or if it is in use as a process's current
+>> working directory?  If so, what happens to that process's future
+>> file system operations?  If not, how do you prevent it?
+We allow the deletion of open directories. A deleted directory can still be read with readdir().
+---- RATIONALE ----
+
+>> B6: Explain why you chose to represent the current directory of a
+>> process the way you did.
+We represent the CWD as a struct dir *. This is because then we don't need to traverse the path again every time we need the working directory. It also allows the process to hold onto the directory even if it has been deleted.
+
+			     BUFFER CACHE
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct read_ahead_entry {
+  struct list_elem list_elem;
+  block_sector_t sector;
+};
+
+struct cache_entry {
+    block_sector_t sector;
+    struct hash_elem elem;
+
+    bool dirty;
+    bool accessed;
+
+    bool is_evcting;
+
+    bool is_read_head;
+    struct condition read_ahead_waiting;
+
+    uint32_t pinned;
+
+    uint32_t lru_timestamp;
+
+    struct lock lock;
+
+    uint8_t data[BLOCK_SECTOR_SIZE];
+};
+
+
+static uint16_t cache_size = 0;
+
+This is the main hash table
+static struct hash cache;
+static struct block *fs_device;
+static struct semaphore shutdown_sema;
+
+static struct lock eviction_lock;
+static struct lock read_ahead_queue_lock;
+
+static struct condition is_empty;
+
+static struct list read_ahead_queue;
+
+static bool disable_read_ahead = false;
+
+---- ALGORITHMS ----
+
+>> C2: Describe how your cache replacement algorithm chooses a cache
+>> block to evict.
+
+We just use an lru algo. We use the ticks since starting from thread.c (we didn’t realize that pintos has rtc.c). The lowest value is the eviction entry.
+
+cache_evict_some_entry in cache.c
+
+>> C3: Describe your implementation of write-behind.
+
+We have a background thread whose whole purpose is the write-behind functionality. In an infinite loop, it waits a predetermined amount of time (order of seconds) and then does one iteration of the write-behind function.
+
+We first iterate through the cache (hash table) and save potential candidates (their disk sector) to write out to disk in a function-local data structure. Potential candidates must be dirty. We do this because the hash table iterator is invalidated on any mutation of the hash table data structure.
+
+Next, we go through our candidates and attempt to write them out. We fetch the entry from the cache again by its sector ID, and check whether it still exists (may have been evicted etc). We make sure the entry is not currently being evicted and is not pinned already. We have different flags for this state is_evicting etc.
+
+We then pin the cache entry, acquire the entries' lock and proceed to write its data out to disk. Then we set the dirty flag to false. We take care to not cause any conflicts with the eviction logic.
+
+We only change the dirty bit in the lock section, because if you do this before and acquire the lock (blocking) and exactly this entry will be evicted during the waiting period. It will be gone, nobody writes this to the disk.
+
+>> C4: Describe your implementation of read-ahead.
+
+The implementation of read-ahead is very tricky, because of the sync.
+
+We use a hash table for the cache (sector -> cache_entry). After a read we enqueue sector + 1 in the read-ahead queue and in the cache table (as cache entry) with the attribute “is_readahead”. We use a variable for the “real” size.
+
+We use a read-ahead thread. This thread only works if the read-ahead queue > 0, if there is no work for the thread (read-ahead queue == 0), it will sleep on the condition lock “is_empty”. It will wake up, if someone enques a read-ahead sector (in the method enqueue_read_ahead_sector).
+if some write / read calls try to do his, but the cache_entry is with the is_readahead flag in the cache. It will wait until the read ahead thread has done its work. Every cache entry has the condition “read_ahead_waiting” and if the read_ahead flag is true in these calls, it will wait. The read-ahead thread will broadcast the change of this condition after reading it.
+
+The read-ahead thread has a higher priority than other threads in pintos (we know that we didn't implement priority scheduling, but if we did, the thread would use it).
+
+This thread dequeues the read_ahead_queue. The state of the sector is the same as before, except for some recovery eviction policy. Every read or write call to this sector waits until this thread has done its work. The thread reads the sector with the buffered_cache_read_ahead call. In this call the cache_entry will convert to an in cache entry (is_read_head = false), there is no problem with the eviction, because our eviction function guarantees you that after return there will be one free slot for you. After the read we do a broadcast for the waiting condition.
+
+---- SYNCHRONIZATION ----
+
+>> C5: When one process is actively reading or writing data in a
+>> buffer cache block, how are other processes prevented from evicting
+>> that block?
+
+Every cache_entry has the attribute “pinned”. If pinned > 0, the eviction algo will ignore this entry. Also every entry has its own lock. If the eviction algo. acquires the entry lock, it is possible that the pinned attribute has changed, for this reason we check the condition after acquiring the lock. The complete eviction method has a monitor lock.
+
+>> C6: During the eviction of a block from the cache, how are other
+>> processes prevented from attempting to access the block?
+
+Every cache_entry has its own lock. We also use the pinned attribute for this. For example a block is currently in the eviction process and we write the blocks to the disk, this call will block. It is possible that some other thread pinned exactly this sector / entry during the eviction writing process. After the eviction process is done writing data to disk, we will also check if the pinned == 0. If it is not 0 we search for a new entry to evict. In a nutshell the pinned attribute has a very high priority and guarantees you that this block will not evict. There could be some problems with periodically flushing of the blocks. For example the eviction function writes and blocks and the flushing thread wants to flush this sector (write is blocking in the eviction process). The cache entry has the special attribute “is_eviciting”. This will exclude the entry from the flushing in the flushing thread, because the eviction function does this already.
+
+---- RATIONALE ----
+
+>> C7: Describe a file workload likely to benefit from buffer caching,
+>> and workloads likely to benefit from read-ahead and write-behind.
+A program which frequently reads data to disk and reads it back into memory will benefit from the buffer cache, because a cache lookup is much faster than a disk read.
+
+A program which writes many small pieces of data (<4KB) to the same disk sector will benefit from write-behind a lot, because many writes will be combined to one big write operation to the disk.
+
+A program which sequentially reads data from a file and processes the data will probably benefit from the read-ahead, because the next sector will already start to load from disk when the program is processing the current chunk of data.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students in future quarters?
+
+>> Any other comments?
+
