@@ -30,7 +30,7 @@ struct inode_disk
     block_sector_t doubleindirect;
   };
 //(124 + 1*128 + 1*128*128) sectors
-// max file size = (124 + 1*128 + 1*128*128) * 512 Byte = 8.5MB
+// max file size = (124 + 1*128 + 1*128*128) * 512 Byte = 8.518MB
 
 struct inode_disk_pointer_table
 {
@@ -54,6 +54,7 @@ struct inode
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
     struct inode_disk data;             /* Inode content. */
+    struct lock extend_lock;
   };
 
 
@@ -215,6 +216,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  lock_init(&inode->extend_lock);
   cache_block_read (fs_device, inode->sector, &inode->data);
   ASSERT(inode != NULL);
   return inode;
@@ -624,9 +626,10 @@ static bool inode_disk_extend(struct inode_disk *disk_inode, uint32_t new_size)
 
 bool inode_extend(struct inode *i, uint32_t new_size)
 {
+  lock_acquire(&i->extend_lock);
   bool success = inode_disk_extend(&i->data, new_size);
   if (success)
-	cache_block_write (fs_device, i->sector, &i->data);
-
+	  cache_block_write (fs_device, i->sector, &i->data);
+  lock_release(&i->extend_lock);
   return success;
 }
