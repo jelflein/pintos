@@ -5,6 +5,7 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 
 /* A directory. */
 struct dir 
@@ -155,8 +156,10 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   ASSERT (name != NULL);
 
   /* Check NAME for validity. */
-  if (*name == '\0' || strlen (name) > NAME_MAX)
-    return false;
+  if (*name == '\0' || strlen (name) > NAME_MAX) {
+    success = false;
+    goto done;
+  }
 
   /* Check that NAME is not in use. */
   if (lookup (dir, name, NULL, NULL)) {
@@ -190,7 +193,8 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   if (success)
     success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
- done:
+  done:
+  lock_release(&dir->lock);
   return success;
 }
 
@@ -239,17 +243,21 @@ dir_remove (struct dir *dir, const char *name)
 bool
 dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
 {
+  lock_acquire(&dir->lock);
   struct dir_entry e;
 
-  while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e) 
+  while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e)
     {
       dir->pos += sizeof e;
       if (e.in_use)
         {
           strlcpy (name, e.name, NAME_MAX + 1);
+          lock_release(&dir->lock);
           return true;
         }
     }
+
+  lock_release(&dir->lock);
   return false;
 }
 
