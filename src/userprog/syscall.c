@@ -418,9 +418,7 @@ void handler_fs_create(struct intr_frame *f) {
   readu((const void *) (stack + 2), sizeof(initial_size), &initial_size);
 
   //lock
-  lock_acquire(&file_sema);
   f->eax = filesys_create(file, initial_size);
-  lock_release(&file_sema);
 }
 
 void handler_fs_remove(struct intr_frame *f) {
@@ -444,9 +442,7 @@ void handler_fs_remove(struct intr_frame *f) {
   readu(file_name_pointer, sizeof file, file);
 
   //lock
-  lock_acquire(&file_sema);
   f->eax = filesys_remove(file);
-  lock_release(&file_sema);
 }
 
 static struct file_descriptor *
@@ -513,7 +509,6 @@ void handler_fs_open(struct intr_frame *f) {
   struct dir *dir_pointer = NULL;
 
   //lock
-  lock_acquire(&file_sema);
 
   bool is_dir;
   void *ptr = filesys_open(file, &is_dir);
@@ -523,7 +518,6 @@ void handler_fs_open(struct intr_frame *f) {
     file_pointer = ptr;
 
 
-  lock_release(&file_sema);
 
   //fail open failed
   if (file_pointer == NULL && dir_pointer == NULL) {
@@ -572,26 +566,20 @@ void handler_fs_filesize(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
   if (fd == NULL) {
     f->eax = -1;
-    lock_release(&file_sema);
     return;
   }
 
   if (fd->is_directory)
   {
-    // TODO: What should we do in this case? Is it legitimate to call
-    //  filesize on a directory?
     f->eax = -1;
-    lock_release(&file_sema);
     return;
   }
 
   f->eax = file_length(fd->f);
-  lock_release(&file_sema);
 }
 
 void handler_fs_read(struct intr_frame *f) {
@@ -621,10 +609,8 @@ void handler_fs_read(struct intr_frame *f) {
   struct thread *cur = thread_current();
 
   //lock
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
   if (fd == NULL || fd->is_directory) {
-    lock_release(&file_sema);
     f->eax = -1;
     return;
   }
@@ -638,12 +624,10 @@ void handler_fs_read(struct intr_frame *f) {
       break;
     }
 
-    lock_release(&file_sema);
     if (!try_writeu(cur->syscall_temp_buffer, chunk_size, buffer + read_so_far)) {
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
-    lock_acquire(&file_sema);
 
     read_so_far += chunk_size;
   }
@@ -651,7 +635,6 @@ void handler_fs_read(struct intr_frame *f) {
   f->eax = read_so_far;
 
   //unlock
-  lock_release(&file_sema);
 }
 
 void handler_fs_write(struct intr_frame *f) {
@@ -677,10 +660,8 @@ void handler_fs_write(struct intr_frame *f) {
   struct thread *cur = thread_current();
 
   //lock
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, cur);
   if (fd == NULL || fd->is_directory) {
-    lock_release(&file_sema);
     f->eax = -1;
     return;
   }
@@ -689,12 +670,10 @@ void handler_fs_write(struct intr_frame *f) {
   for (; written_so_far < size;) {
     size_t chunk_size = MIN((size_t)PGSIZE, size - written_so_far);
 
-    lock_release(&file_sema);
     if (!try_readu(buffer + written_so_far, chunk_size, cur->syscall_temp_buffer)) {
       process_terminate(thread_current(), -1, thread_current()
               ->program_name);
     }
-    lock_acquire(&file_sema);
 
     chunk_size = file_write(fd->f, cur->syscall_temp_buffer, (off_t) chunk_size);
 
@@ -708,7 +687,6 @@ void handler_fs_write(struct intr_frame *f) {
   f->eax = written_so_far;
 
   //unlock
-  lock_release(&file_sema);
 }
 
 /*
@@ -730,10 +708,8 @@ void handler_fs_seek(struct intr_frame *f) {
   readu((const void *) (stack + 2), sizeof(position), &position);
 
   //lock
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
   if (fd == NULL || fd->is_directory) {
-    lock_release(&file_sema);
     return;
   }
 
@@ -741,7 +717,6 @@ void handler_fs_seek(struct intr_frame *f) {
   file->pos = (int) position;
 
   //unlock
-  lock_release(&file_sema);
 }
 
 /*
@@ -756,9 +731,7 @@ void handler_fs_tell(struct intr_frame *f) {
 
   readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
-  lock_release(&file_sema);
 
   if (fd == NULL || fd->is_directory) {
     f->eax = 0;
@@ -778,11 +751,9 @@ void handler_fs_close(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
   if (fd == 0) {
-    lock_release(&file_sema);
     return;
   }
 
@@ -796,7 +767,6 @@ void handler_fs_close(struct intr_frame *f) {
 
   //remove from list
   list_remove(&(fd->list_elem));
-  lock_release(&file_sema);
 
   free(fd);
 }
@@ -1076,9 +1046,7 @@ static void handler_readdir(struct intr_frame *f)
   void *name;
   readu((const void *) (stack + 2), sizeof(name), &name);
 
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
-  lock_release(&file_sema);
 
   if (fd == NULL || !fd->is_directory) {
     f->eax = 0;
@@ -1105,9 +1073,7 @@ static void handler_isdir(struct intr_frame *f)
   int fd_id;
   readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
-  lock_release(&file_sema);
 
   if (fd == NULL) {
     f->eax = 0;
@@ -1125,9 +1091,7 @@ static void handler_inumber(struct intr_frame *f)
   int fd_id;
   readu((const void *) (stack + 1), sizeof(fd_id), &fd_id);
 
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, thread_current());
-  lock_release(&file_sema);
 
   if (fd == NULL) {
     f->eax = 0;
