@@ -359,7 +359,8 @@ void acquire_write(struct read_writer_lock *read_writer_lock) {
   lock_acquire(&read_writer_lock->mutex);
   bool atomic = read_writer_lock->active_atomic || read_writer_lock->is_atomic;
 
-  if (read_writer_lock->active_readers == && read_writer_lock->active_writers == 0
+  if (read_writer_lock->active_readers == 0 &&
+  read_writer_lock->active_writers == 0
       && !atomic) {
 
     read_writer_lock->active_writers++;
@@ -381,7 +382,7 @@ void acquire_read(struct read_writer_lock *read_writer_lock) {
 
 
   if (read_writer_lock->active_writers == 0
-      && list_size(read_writer_lock->waiting_atomic.waiters) == 0) {
+      && list_size(&read_writer_lock->waiting_atomic.waiters) == 0) {
     read_writer_lock->active_readers++;
     lock_release(&read_writer_lock->mutex);
     return;
@@ -414,10 +415,10 @@ void release_read(struct read_writer_lock *read_writer_lock) {
 
   read_writer_lock->active_readers--;
 
-  if (list_size(read_writer_lock->waiting_atomic.waiters) > 0) {
+  if (list_size(&read_writer_lock->waiting_atomic.waiters) > 0) {
     if (read_writer_lock->active_writers == 0) {
       ASSERT(read_writer_lock->active_readers == 0);
-      ASSERT(read_writer_lock->waiting_writers == 0);
+      ASSERT(read_writer_lock->active_writers == 0);
 
       cond_signal(&read_writer_lock->waiting_atomic, &read_writer_lock->mutex);
 
@@ -426,7 +427,7 @@ void release_read(struct read_writer_lock *read_writer_lock) {
     }
   }
 
-  if (list_size(read_writer_lock->waiting_writers.waiters) > 0) {
+  if (list_size(&read_writer_lock->waiting_writers.waiters) > 0) {
     if (read_writer_lock->active_writers == 0) {
       ASSERT(read_writer_lock->active_readers == 0);
 
@@ -443,10 +444,10 @@ void release_write(struct read_writer_lock *read_writer_lock)
 
   read_writer_lock->active_writers--;
 
-  if (list_size(read_writer_lock->waiting_atomic.waiters) > 0) {
+  if (list_size(&read_writer_lock->waiting_atomic.waiters) > 0) {
     if (read_writer_lock->active_writers == 0) {
       ASSERT(read_writer_lock->active_readers == 0);
-      ASSERT(read_writer_lock->waiting_writers == 0);
+      ASSERT(read_writer_lock->active_writers == 0);
 
       cond_signal(&read_writer_lock->waiting_atomic, &read_writer_lock->mutex);
       lock_release(&read_writer_lock->mutex);
@@ -454,7 +455,7 @@ void release_write(struct read_writer_lock *read_writer_lock)
     }
   }
 
-  if (list_size(read_writer_lock->waiting_writers.waiters) > 0) {
+  if (list_size(&read_writer_lock->waiting_writers.waiters) > 0) {
     if (read_writer_lock->active_writers == 0) {
       ASSERT(read_writer_lock->active_readers == 0);
 
