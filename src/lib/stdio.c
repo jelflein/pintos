@@ -97,7 +97,7 @@ d_printf (const char *format, ...)
   static const bool disable = true;
 #endif
 
-  if (disable) return 0;
+  if (true) return 0;
 
   va_list args;
   int retval;

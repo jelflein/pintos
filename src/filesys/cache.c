@@ -16,7 +16,7 @@
 
 #define CACHE_ENTRIES 64
 
-static volatile uint16_t cache_size = 0;
+static uint16_t cache_size = 0;
 
 static struct hash cache;
 static struct block *fs_device;
@@ -28,8 +28,6 @@ static struct lock read_ahead_queue_lock;
 static struct condition is_empty;
 
 static struct list read_ahead_queue;
-static struct semaphore read_ahead_sema;
-static struct semaphore read_ahead_queue_not_empty_sema;
 
 static bool disable_read_ahead = false;
 
@@ -74,8 +72,6 @@ void init_cache() {
   cond_init(&is_empty);
 
   sema_init(&shutdown_sema, 0);
-  sema_init(&read_ahead_sema, 0);
-  sema_init(&read_ahead_queue_not_empty_sema, 0);
 
   thread_create("fs-flush", 0, thread_flush, "system");
   if(!disable_read_ahead) thread_create("fs-read-ahead", 0, thread_read_ahead, "system");
@@ -248,7 +244,6 @@ static void print_buffer(uint8_t *b, uint32_t length) {
 
 struct write_entry {
   block_sector_t sector;
-  struct cache_entry *e;
 };
 
 static void write_cache_to_disk(void) {
@@ -270,7 +265,6 @@ static void write_cache_to_disk(void) {
 
       //ASSERT(e->sector < 4096);
       data[j].sector = e->sector;
-      data[j].e = e;
 
       j++;
     }
@@ -291,22 +285,30 @@ static void write_cache_to_disk(void) {
     if(live_entry->is_evcting) continue;
     if(live_entry->is_read_head) continue;
 
-    lock_acquire(&e.e->lock);
+      live_entry->pinned++;
+
+      lock_acquire(&live_entry->lock);
+
+      *live_entry = cache_get_entry(e.sector);
+
+      if(live_entry == NULL) continue;
+      if(live_entry->is_evcting) continue;
+      if(live_entry->is_read_head) continue;
 
     if(!live_entry->dirty)
     {
-      lock_release(&e.e->lock);
+        live_entry->pinned--;
+        lock_release(&live_entry->lock);
       continue;
     }
 
-    e.e->dirty = false;
-    e.e->pinned++;
+    live_entry->dirty = false;
 
-    block_write(fs_device, e.e->sector, e.e->data);
+    block_write(fs_device, live_entry->sector, live_entry->data);
 
-    e.e->pinned--;
+    live_entry->pinned--;
 
-    lock_release(&e.e->lock);
+    lock_release(&live_entry->lock);
   }
 
   free(data);
@@ -584,8 +586,6 @@ static void enqueue_read_ahead_sector(block_sector_t sector) {
 static _Noreturn void thread_read_ahead(void *aux UNUSED) {
   while (true) {
     if (list_empty(&read_ahead_queue)) {
-      ASSERT(list_size(&read_ahead_queue_not_empty_sema.waiters) == 0);
-
       lock_acquire(&read_ahead_queue_lock);
       cond_wait(&is_empty, &read_ahead_queue_lock);
       lock_release(&read_ahead_queue_lock);
