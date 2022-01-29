@@ -289,7 +289,7 @@ static void write_cache_to_disk(void) {
 
       lock_acquire(&live_entry->lock);
 
-      *live_entry = cache_get_entry(e.sector);
+      live_entry = cache_get_entry(e.sector);
 
       if(live_entry == NULL) continue;
       if(live_entry->is_evcting) continue;
