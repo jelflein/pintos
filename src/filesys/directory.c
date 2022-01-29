@@ -11,6 +11,7 @@ struct dir
   {
     struct inode *inode;                /* Backing store. */
     off_t pos;                          /* Current position. */
+    struct lock lock;
   };
 
 /* A single directory entry. */
@@ -40,6 +41,7 @@ dir_open (struct inode *inode)
     {
       dir->inode = inode;
       dir->pos = 0;
+      lock_init(&dir->lock);
       return dir;
     }
   else
@@ -120,6 +122,7 @@ bool
 dir_lookup (const struct dir *dir, const char *name,
             struct inode **inode) 
 {
+  lock_acquire((struct lock*)&dir->lock);
   struct dir_entry e;
 
   ASSERT (dir != NULL);
@@ -130,6 +133,7 @@ dir_lookup (const struct dir *dir, const char *name,
   else
     *inode = NULL;
 
+  lock_release((struct lock*)&dir->lock);
   return *inode != NULL;
 }
 
@@ -142,6 +146,7 @@ dir_lookup (const struct dir *dir, const char *name,
 bool
 dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 {
+  lock_acquire(&dir->lock);
   struct dir_entry e;
   off_t ofs;
   bool success = true;
@@ -154,8 +159,10 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
     return false;
 
   /* Check that NAME is not in use. */
-  if (lookup (dir, name, NULL, NULL))
+  if (lookup (dir, name, NULL, NULL)) {
+    success = false;
     goto done;
+  }
 
   /* Set OFS to offset of free slot.
      If there are no free slots, then it will be set to the
@@ -193,6 +200,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 bool
 dir_remove (struct dir *dir, const char *name) 
 {
+  lock_acquire(&dir->lock);
   struct dir_entry e;
   struct inode *inode = NULL;
   bool success = false;
@@ -221,6 +229,7 @@ dir_remove (struct dir *dir, const char *name)
 
  done:
   inode_close (inode);
+  lock_release(&dir->lock);
   return success;
 }
 
@@ -239,13 +248,14 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
         {
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
-        } 
+        }
     }
   return false;
 }
 
 bool dir_is_empty(struct dir *dir)
 {
+  lock_acquire(&dir->lock);
   int32_t pos = 0;
   struct dir_entry e;
   while (inode_read_at (dir->inode, &e, sizeof e, pos) == sizeof e)
@@ -254,8 +264,10 @@ bool dir_is_empty(struct dir *dir)
     // ignore empty entries and special .. entry
     if (e.in_use && strcmp("..", e.name) != 0)
     {
+      lock_release(&dir->lock);
       return false;
     }
   }
+  lock_release(&dir->lock);
   return true;
 }
