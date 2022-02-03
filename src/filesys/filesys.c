@@ -126,12 +126,15 @@ filesys_remove (const char *name)
 {
   bool path_is_dir;
   struct dir *containing_dir = NULL;
-  char *last_component;
+  char *last_component = NULL;
   void *file_or_dir = traverse_path(name, &path_is_dir, false, &last_component,
                                     &containing_dir);
-  if (file_or_dir == NULL) return false;
-
   bool success = false;
+  if (file_or_dir == NULL) goto done;
+
+  // deny deleting parent dir entry
+  if (last_component != NULL && strcmp(last_component, "..") == 0) goto done;
+
 
   if (path_is_dir) {
     struct dir *d = (struct dir *) file_or_dir;

@@ -330,6 +330,12 @@ inode_remove (struct inode *inode)
 off_t
 inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset) 
 {
+  if (offset + size >= inode_get_length(inode))
+  {
+    lock_acquire(&inode->extend_lock);
+    lock_release(&inode->extend_lock);
+  }
+
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
 
