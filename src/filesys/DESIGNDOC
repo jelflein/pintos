@@ -78,7 +78,7 @@ struct inode has a lock extend_lock, which is acquired when extending a file. Th
 >> may not read data other than what B writes, e.g. if B writes
 >> nonzero data, A is not allowed to see all zeros.  Explain how your
 >> code avoids this race.
-??????????????????????????????????????????????
+This is synchronized with the file-extend-lock in inode. When reading past the end of a file, we acquire the extend-lock briefly to make sure any ongoing extension is done.
 
 >> A5: Explain how your synchronization design provides "fairness".
 >> File access is "fair" if readers cannot indefinitely block writers
@@ -86,7 +86,9 @@ struct inode has a lock extend_lock, which is acquired when extending a file. Th
 >> prevent forever another process from writing the file, and many
 >> processes writing to a file cannot prevent another process forever
 >> from reading the file.
-???
+
+If the sector is in the cache, we use memcpy for read / write, this function can not block. Pintos executes a context switch only when a function is blocked or when a timer interrupt occurs (it will switch to the timer interrupt function and then it will switch to the last pc). If a thread reads from / writes to the cache (and cache entry already exists) nothing can block. Therefore there can not be any concurrent reads if the entry already exists. If the entry is created for the first time or an entry should be evicted and the data needs to be loaded from disk, the entry is locked by a normal Pintos lock for that time. The lock internally uses a semaphore which holds a queue of waiters. Both readers and writers are waiters in this scenario, therefore the lock is fair in this sense that it works like a FIFO.
+However, in pintos it is possible that one thread monopolizes the whole cpu if it never calls any blocking functions. If you want some “real” fairness, this is a job for the thread scheduling (time slices etc.). But with the current impl. of pintos fairness is a complicated thing.
 
 ---- RATIONALE ----
 
