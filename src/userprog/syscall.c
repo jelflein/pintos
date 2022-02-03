@@ -932,7 +932,8 @@ void close_mfile(struct thread *t, struct m_file *m_file) {
         // page has been written to
         fs_lock();
         file_seek(m_file->file, (int) entry_copy.file_offset);
-        file_write(m_file->file, (void *) kaddr, (int) entry_copy.read_bytes);
+        file_uncached_write(m_file->file, (void *) kaddr, (int) entry_copy
+        .read_bytes);
         fs_unlock();
 
         frametable_lock();

@@ -225,8 +225,8 @@ page_fault (struct intr_frame *f)
       // read contents from file into newly allocated frame
       file_seek(spt_entry->file, (int)spt_entry->file_offset);
       // this may block and run another thread in the meantime
-      file_read(spt_entry->file, frame_pointer, (int)spt_entry->read_bytes);
-
+      //file_read(spt_entry->file, frame_pointer, (int)spt_entry->read_bytes);
+      file_uncached_read(spt_entry->file, frame_pointer, (int)spt_entry->read_bytes);
       spt_entry->spe_status = spt_entry->spe_status ==
               mapped_file_nowriteback ? frame : frame_from_file;
 

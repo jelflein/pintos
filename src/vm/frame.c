@@ -151,7 +151,8 @@ void do_swapping() {
       if (!was_already_locked) fs_lock();
 
       file_seek(se->file, (int) se->file_offset);
-      file_write(se->file, kernel_addr, (int) se->read_bytes);
+      //file_write(se->file, kernel_addr, (int) se->read_bytes);
+      file_uncached_write(se->file, kernel_addr, (int) se->read_bytes);
 
       if (!was_already_locked) fs_unlock();
     }

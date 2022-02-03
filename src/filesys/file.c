@@ -66,6 +66,15 @@ file_read (struct file *file, void *buffer, off_t size)
   return bytes_read;
 }
 
+off_t
+file_uncached_read (struct file *file, void *buffer, off_t size)
+{
+  off_t bytes_read = inode_uncached_read_at (file->inode, buffer, size,
+                                           file->pos);
+  file->pos += bytes_read;
+  return bytes_read;
+}
+
 /* Reads SIZE bytes from FILE into BUFFER,
    starting at offset FILE_OFS in the file.
    Returns the number of bytes actually read,
@@ -80,6 +89,20 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
 static bool file_extend(struct file *file, uint32_t size)
 {
   return inode_extend(file->inode, size);
+}
+
+off_t file_uncached_write (struct file *file, const void *buffer, off_t size)
+{
+  if (file->pos + size > file_length(file))
+  {
+    d_printf("Need to extend the file\n");
+    if (!file_extend(file, file->pos + size))
+      return 0;
+  }
+
+  off_t bytes_written = inode_uncached_write_at(file->inode, buffer, size, file->pos);
+  file->pos += bytes_written;
+  return bytes_written;
 }
 
 /* Writes SIZE bytes from BUFFER into FILE,
