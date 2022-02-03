@@ -502,11 +502,11 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
 
   ASSERT(cache_get_entry(sector) != NULL);
 
+  c_entry->pinned++;
+
   d_printf("415 wait %u\n", c_entry->sector);
   lock_acquire(&c_entry->lock);
   d_printf("417 realse %u\n", c_entry->sector);
-
-  c_entry->pinned++;
 
   if (c_entry->is_read_head) {
     d_printf("421 wait %u\n", c_entry->sector);
