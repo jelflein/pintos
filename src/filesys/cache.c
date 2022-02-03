@@ -96,9 +96,6 @@ static bool cache_has_space_available(void) {
 
 static struct cache_entry *cache_create_entry(block_sector_t sector, bool evict, bool is_read_head) {
   ASSERT(sector < 4096);
-
-  d_printf("100 %u %u %u\n", sector, evict, is_read_head);
-
   ASSERT(cache_has_space_available() || evict || is_read_head);
 
   struct cache_entry *e = calloc(1, sizeof(struct cache_entry));
@@ -126,7 +123,6 @@ static struct cache_entry *cache_create_entry(block_sector_t sector, bool evict,
   ASSERT(cache_has_space_available() || evict || is_read_head);
 
   if (!is_read_head) {
-    d_printf("+++");
     cache_size++;
   }
 
@@ -136,7 +132,6 @@ static struct cache_entry *cache_create_entry(block_sector_t sector, bool evict,
 }
 
 static void _delete_entry(struct cache_entry *e) {
-  d_printf("delete %u", e->sector);
   struct hash_elem *he = hash_delete(&cache, &e->elem);
   ASSERT(he != NULL);
 }
@@ -149,7 +144,6 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
   lock_acquire(&eviction_lock);
 
   do {
-    d_printf("evict \n");
     struct hash_iterator iter;
     hash_first(&iter, &cache);
 
@@ -170,10 +164,7 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
     }
 
     ASSERT(lowest_c_entry != NULL && "Have to find one entry to evict");
-    d_printf("evict sleep\n");
     lock_acquire(&lowest_c_entry->lock);
-    d_printf("evict re\n");
-
     ASSERT(lowest_c_entry != NULL);
 
     if (lowest_c_entry->pinned != 0 || lowest_c_entry->is_read_head
@@ -186,8 +177,6 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
     lowest_c_entry->is_evcting = true;
 
     if (lowest_c_entry->dirty) {
-      //d_printf("Buffercache: evict sector %u to disk\n",
-//               lowest_c_entry->sector);
       lowest_c_entry->dirty = false;
       lowest_c_entry->lru_timestamp = get_time_since_start();
 
@@ -200,7 +189,6 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
       }
     }
 
-    d_printf("cache size %u %u\n", cache_size, lowest_c_entry->is_read_head);
     ASSERT(cache_get_entry(lowest_c_entry->sector) != NULL);
     ASSERT(lowest_c_entry->pinned == 0);
     _delete_entry(lowest_c_entry);
@@ -209,19 +197,11 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
     lock_release(&lowest_c_entry->lock);
     lock_release(&eviction_lock);
 
-    d_printf("cache size %u\n", cache_size);
-
     ASSERT(!cache_get_entry(lowest_c_entry->sector));
 
-    d_printf("finsih evicut %u\n", lowest_c_entry->sector);
-
     if(create_new) {
-      d_printf("214 create %u %u\n", sector, cache_size);
-
       struct cache_entry *c = cache_create_entry(sector, true, false);
       cache_size--;
-      d_printf("---");
-
       ASSERT(cache_size <= CACHE_ENTRIES);
       free(lowest_c_entry);
 
@@ -234,12 +214,6 @@ static struct cache_entry *cache_evict_some_entry(block_sector_t sector, bool cr
     ASSERT(cache_size <= CACHE_ENTRIES);
     return NULL;
   } while (true);
-}
-
-static void print_buffer(uint8_t *b, uint32_t length) {
-  for (uint32_t i = 0; i < length; i++) {
-    printf("%02X", b[i]);
-  }
 }
 
 struct write_entry {
@@ -325,7 +299,6 @@ static _Noreturn void thread_flush(void *aux UNUSED) {
     write_cache_to_disk();
 
     if (!list_empty(&shutdown_sema.waiters)) {
-      //d_printf("sema up\n");
       sema_up(&shutdown_sema);
     }
   }
@@ -349,14 +322,12 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
   ASSERT(sector_ofs + chunk_size <= BLOCK_SECTOR_SIZE);
   ASSERT(fs_device == block);
 
-  //d_printf("write sector %u (%u..%u)\n", sector, sector_ofs, sector_ofs + chunk_size);
-
+  d_printf("write sector %u (%u..%u)\n", sector, sector_ofs, sector_ofs + chunk_size);
   struct cache_entry *c_entry = cache_get_entry(sector);
 
   if (c_entry == NULL) {
     if (!cache_has_space_available()) c_entry = cache_evict_some_entry(sector, true);
     else {
-      d_printf("298 create %u\n", sector);
       c_entry = cache_create_entry(sector, false, false);
     }
 
@@ -365,20 +336,13 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
 
     if (sector_ofs != 0 || chunk_size < BLOCK_SECTOR_SIZE) {
       // read whole sector in first
-      //d_printf("a lock write\n");
-      d_printf("301 wating %u\n", c_entry->sector);
       lock_acquire(&c_entry->lock);
-      d_printf("303 re %u\n", c_entry->sector);
-
       ASSERT(cache_get_entry(sector) != NULL);
       block_read(block, sector, c_entry->data);
 
       lock_release(&c_entry->lock);
     }
-
-    d_printf("309 wating %u\n", c_entry->sector);
     lock_acquire(&c_entry->lock);
-    d_printf("311 re %u\n", c_entry->sector);
 
     ASSERT(cache_get_entry(sector) != NULL);
     ASSERT(c_entry != NULL);
@@ -390,7 +354,6 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
     c_entry->lru_timestamp = (uint32_t) get_time_since_start();
     c_entry->pinned--;
 
-    d_printf("324 re %u\n", c_entry->sector);
     lock_release(&c_entry->lock);
 
     return;
@@ -399,15 +362,11 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
   c_entry->pinned++;
 
   //in cache
-  d_printf("327 wating %u\n", c_entry->sector);
   lock_acquire(&c_entry->lock);
-  d_printf("329 re %u\n", c_entry->sector);
 
 
   if (c_entry->is_read_head) {
-    d_printf("330 wait %u\n", c_entry->sector);
     cond_wait(&c_entry->read_ahead_waiting, &c_entry->lock);
-    d_printf("333 realse %u\n", c_entry->sector);
   }
 
   c_entry = cache_get_entry(sector);
@@ -417,7 +376,6 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
       ASSERT(0);
       c_entry = cache_evict_some_entry(sector, true);
     } else {
-      d_printf("352 create %u\n",sector);
       c_entry = cache_create_entry(sector, false, false);
     }
   }
@@ -432,7 +390,6 @@ void *buffer, const uint32_t chunk_size, const uint32_t sector_ofs) {
 
   c_entry->pinned--;
 
-  d_printf("357 wating %u\n", c_entry->sector);
   lock_release(&c_entry->lock);
 }
 
@@ -444,7 +401,7 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
   ASSERT(sector_ofs + chunk_size <= BLOCK_SECTOR_SIZE);
   ASSERT(fs_device == block);
 
-  //d_printf("read sector %u\n", sector);
+  d_printf("read sector %u\n", sector);
 
   struct cache_entry *c_entry = cache_get_entry(sector);
 
@@ -456,24 +413,19 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
     }
     else if (!is_read_head_entry)
     {
-      d_printf("391 create %u\n", sector);
       c_entry = cache_create_entry(sector, false, false);
     }
 
     c_entry->pinned++;
     c_entry->lru_timestamp = (uint32_t) get_time_since_start();
 
-    d_printf("382 wating %u\n", c_entry->sector);
     lock_acquire(&c_entry->lock);
-    d_printf("384 re %u\n", c_entry->sector);
 
     ASSERT(cache_get_entry(sector) != NULL);
-    //d_printf("read sector %u from disk\n", sector);
     block_read(block, sector, c_entry->data);
 
     if(!is_readahead) memcpy(buffer, c_entry->data + sector_ofs, chunk_size);
 
-    d_printf("390 relse %u\n", c_entry->sector);
     lock_release(&c_entry->lock);
 
     if (is_readahead)
@@ -484,7 +436,6 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
       }
 
       c_entry->is_read_head = false;
-      d_printf("+++readhead");
       cache_size++;
       ASSERT(cache_size <= CACHE_ENTRIES);
     }
@@ -502,16 +453,12 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
 
   ASSERT(cache_get_entry(sector) != NULL);
 
-  d_printf("415 wait %u\n", c_entry->sector);
   lock_acquire(&c_entry->lock);
-  d_printf("417 realse %u\n", c_entry->sector);
 
   c_entry->pinned++;
 
   if (c_entry->is_read_head) {
-    d_printf("421 wait %u\n", c_entry->sector);
     cond_wait(&c_entry->read_ahead_waiting, &c_entry->lock);
-    d_printf("423 realse %u\n", c_entry->sector);
   }
 
   struct cache_entry *debug = cache_get_entry(sector);
@@ -523,7 +470,6 @@ cache_block_read_chunk_readahead(struct block *block, block_sector_t sector,
   memcpy(buffer, c_entry->data + sector_ofs, chunk_size);
   c_entry->pinned--;
 
-  d_printf("435 realse %u\n", c_entry->sector);
   lock_release(&c_entry->lock);
 }
 
@@ -573,7 +519,6 @@ static void enqueue_read_ahead_sector(block_sector_t sector) {
   bool list_was_empty = list_empty(&read_ahead_queue);
   list_push_back(&read_ahead_queue, &e->list_elem);
 
-  d_printf("504 create %u\n", sector);
   cache_create_entry(sector, false, true);
 
   if (list_was_empty) {
@@ -596,7 +541,6 @@ static _Noreturn void thread_read_ahead(void *aux UNUSED) {
                                                 list_elem);
 
     // don't load it if we already have it
-    d_printf("read-ahead %u\n", entry->sector);
     struct cache_entry *c_entry = cache_get_entry(entry->sector);
     ASSERT(c_entry != NULL);
 
@@ -607,7 +551,6 @@ static _Noreturn void thread_read_ahead(void *aux UNUSED) {
 
     //after read
     lock_acquire(&read_ahead_queue_lock);
-    d_printf("545 broadcast %u\n", c_entry->sector);
     cond_broadcast(&c_entry->read_ahead_waiting, &read_ahead_queue_lock);
     lock_release(&read_ahead_queue_lock);
 

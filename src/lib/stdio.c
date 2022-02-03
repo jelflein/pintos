@@ -91,13 +91,7 @@ printf (const char *format, ...)
 int
 d_printf (const char *format, ...)
 {
-#if DEBUG
-  static const bool disable = false;
-#else
-  static const bool disable = true;
-#endif
-
-  if (true) return 0;
+  if (1) return 0;
 
   va_list args;
   int retval;

@@ -46,7 +46,7 @@ bytes_to_sectors (off_t size)
 }
 
 /* In-memory inode. */
-struct inode 
+struct inode
   {
     struct list_elem elem;              /* Element in inode list. */
     block_sector_t sector;              /* Sector number of disk location. */
@@ -134,7 +134,7 @@ static struct list open_inodes;
 
 /* Initializes the inode module. */
 void
-inode_init (void) 
+inode_init (void)
 {
   list_init (&open_inodes);
 }
@@ -195,18 +195,18 @@ inode_open (block_sector_t sector)
 
   /* Check whether this inode is already open. */
   for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
-       e = list_next (e)) 
+       e = list_next (e))
     {
       inode = list_entry (e, struct inode, elem);
-      if (inode->sector == sector) 
+      if (inode->sector == sector)
         {
           inode_reopen (inode);
-          return inode; 
+          return inode;
         }
     }
 
   /* Allocate memory. */
-  inode = malloc (sizeof *inode);
+  inode = calloc(1, sizeof *inode);
   if (inode == NULL)
     return NULL;
 
@@ -242,7 +242,7 @@ inode_get_inumber (const struct inode *inode)
    If this was the last reference to INODE, frees its memory.
    If INODE was also a removed inode, frees its blocks. */
 void
-inode_close (struct inode *inode) 
+inode_close (struct inode *inode)
 {
   /* Ignore null pointer. */
   if (inode == NULL)
@@ -318,7 +318,7 @@ inode_close (struct inode *inode)
 /* Marks INODE to be deleted when it is closed by the last caller who
    has it open. */
 void
-inode_remove (struct inode *inode) 
+inode_remove (struct inode *inode)
 {
   ASSERT (inode != NULL);
   inode->removed = true;
@@ -348,6 +348,8 @@ inode_uncached_read_at (struct inode *inode, void *buffer_, off_t size, off_t
     int chunk_size = size < min_left ? size : min_left;
     if (chunk_size <= 0)
       break;
+
+    d_printf("uncached read sector %u\n", sector_idx);
 
     if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
     {
@@ -382,7 +384,7 @@ inode_uncached_read_at (struct inode *inode, void *buffer_, off_t size, off_t
    Returns the number of bytes actually read, which may be less
    than SIZE if an error occurs or end of file is reached. */
 off_t
-inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset) 
+inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 {
   if (offset + size >= inode_get_length(inode))
   {
@@ -455,6 +457,8 @@ off_t inode_uncached_write_at (struct inode *inode, const void *buffer_, off_t
     if (chunk_size <= 0)
       break;
 
+    d_printf("uncached write sector %u\n", sector_idx);
+
     if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
     {
       /* Write full sector directly to disk. */
@@ -498,7 +502,7 @@ off_t inode_uncached_write_at (struct inode *inode, const void *buffer_, off_t
    growth is not yet implemented.) */
 off_t
 inode_write_at (struct inode *inode, const void *buffer_, off_t size,
-                off_t offset) 
+                off_t offset)
 {
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
@@ -506,7 +510,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   if (inode->deny_write_cnt)
     return 0;
 
-  while (size > 0) 
+  while (size > 0)
     {
       /* Sector to write, starting byte offset within sector. */
       block_sector_t sector_idx = byte_to_sector (inode, offset);
@@ -528,7 +532,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
           /* Write full sector directly to disk. */
           cache_block_write (fs_device, sector_idx, buffer + bytes_written);
         }
-      else 
+      else
         {
           cache_block_write_chunk(fs_device, sector_idx,
                                   buffer + bytes_written, chunk_size,
@@ -547,7 +551,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 /* Disables writes to INODE.
    May be called at most once per inode opener. */
 void
-inode_deny_write (struct inode *inode) 
+inode_deny_write (struct inode *inode)
 {
   inode->deny_write_cnt++;
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
@@ -557,7 +561,7 @@ inode_deny_write (struct inode *inode)
    Must be called once by each inode opener who has called
    inode_deny_write() on the inode, before closing the inode. */
 void
-inode_allow_write (struct inode *inode) 
+inode_allow_write (struct inode *inode)
 {
   ASSERT (inode->deny_write_cnt > 0);
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);

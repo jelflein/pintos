@@ -69,7 +69,7 @@ file_read (struct file *file, void *buffer, off_t size)
 off_t
 file_uncached_read (struct file *file, void *buffer, off_t size)
 {
-  off_t bytes_read = inode_uncached_read_at (file->inode, buffer, size,
+  off_t bytes_read = inode_read_at (file->inode, buffer, size,
                                            file->pos);
   file->pos += bytes_read;
   return bytes_read;
@@ -100,7 +100,7 @@ off_t file_uncached_write (struct file *file, const void *buffer, off_t size)
       return 0;
   }
 
-  off_t bytes_written = inode_uncached_write_at(file->inode, buffer, size, file->pos);
+  off_t bytes_written = inode_write_at(file->inode, buffer, size, file->pos);
   file->pos += bytes_written;
   return bytes_written;
 }

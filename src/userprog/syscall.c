@@ -80,11 +80,8 @@ void unsync_close_mfile(struct thread *t, struct m_file *m_file);
 
 void close_mfile(struct thread *t, struct m_file *m_file);
 
-struct lock file_sema;
-
 void
 syscall_init(void) {
-  lock_init(&file_sema);
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -301,7 +298,7 @@ static void writeu(const void *src, const size_t s, void *dest) {
 static size_t strlenu(const char *string) {
   const char *p = string;
 
-  ASSERT (string != NULL);
+  ASSERT(string != NULL);
 
   int current_byte;
   do {
@@ -354,11 +351,9 @@ void handler_exec(struct intr_frame *f) {
     return;
   }
 
-  lock_acquire(&file_sema);
   tid_t pid = process_execute(cmd_line);
 
   if (pid == -1) {
-    lock_release(&file_sema);
     syscall_ret_value(-1, f);
     return;
   }
@@ -371,7 +366,6 @@ void handler_exec(struct intr_frame *f) {
   struct thread *child_thread = thread_from_tid(pid);
   //sema sleep until loaded
   sema_down(&child_thread->process_load_sema);
-  lock_release(&file_sema);
   //check if thread failed
   // the thread might be gone by now
   enum intr_level il = intr_get_level();
@@ -454,8 +448,8 @@ find_file_descriptor(int fd, struct thread *thread) {
        e != list_end(&thread->file_descriptors);
        e = list_next(e)) {
     struct file_descriptor *entry = list_entry(e,
-                                               struct file_descriptor,
-                                               list_elem);
+    struct file_descriptor,
+    list_elem);
 
     if (entry->descriptor_id == fd) {
       return entry;
@@ -473,7 +467,7 @@ find_mfile(int map_id, struct thread *thread) {
        e != list_end(&thread->mapped_files);
        e = list_next(e)) {
     struct m_file *entry = list_entry(e,
-                                      struct m_file, list_elem);
+    struct m_file, list_elem);
 
     if (entry->id == map_id) {
       return entry;
@@ -536,8 +530,8 @@ void handler_fs_open(struct intr_frame *f) {
   struct list *fd_list = &thread_current()->file_descriptors;
   if (!list_empty(fd_list)) {
     int id = list_entry(list_back(fd_list),
-                        struct file_descriptor,
-                        list_elem)->descriptor_id;
+    struct file_descriptor,
+    list_elem)->descriptor_id;
     last_id = id + 1;
   }
 
@@ -573,8 +567,7 @@ void handler_fs_filesize(struct intr_frame *f) {
     return;
   }
 
-  if (fd->is_directory)
-  {
+  if (fd->is_directory) {
     f->eax = -1;
     return;
   }
@@ -617,7 +610,7 @@ void handler_fs_read(struct intr_frame *f) {
 
   size_t read_so_far = 0;
   for (; read_so_far < size;) {
-    off_t chunk_size = MIN((size_t)PGSIZE, size - read_so_far);
+    off_t chunk_size = MIN((size_t) PGSIZE, size - read_so_far);
     chunk_size = file_read(fd->f, cur->syscall_temp_buffer, (off_t) chunk_size);
 
     if (chunk_size == 0) {
@@ -668,7 +661,7 @@ void handler_fs_write(struct intr_frame *f) {
 
   size_t written_so_far = 0;
   for (; written_so_far < size;) {
-    size_t chunk_size = MIN((size_t)PGSIZE, size - written_so_far);
+    size_t chunk_size = MIN((size_t) PGSIZE, size - written_so_far);
 
     if (!try_readu(buffer + written_so_far, chunk_size, cur->syscall_temp_buffer)) {
       process_terminate(thread_current(), -1, thread_current()
@@ -757,11 +750,9 @@ void handler_fs_close(struct intr_frame *f) {
     return;
   }
 
-  if (fd->is_directory)
-  {
+  if (fd->is_directory) {
     dir_close(fd->d);
-  }
-  else {
+  } else {
     file_close(fd->f);
   }
 
@@ -802,12 +793,10 @@ void handler_mmap(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  lock_acquire(&file_sema);
   struct file_descriptor *fd = find_file_descriptor(fd_id, t);
 
   if (fd == 0 || fd->is_directory) {
     f->eax = -1;
-    lock_release(&file_sema);
     return;
   }
 
@@ -816,27 +805,22 @@ void handler_mmap(struct intr_frame *f) {
   //check is not zero
   if (filesize == 0) {
     f->eax = -1;
-    lock_release(&file_sema);
     return;
   }
 
   //check kernel access
-  if ((uint32_t) addr + (uint32_t) filesize >= (uint32_t)PHYS_BASE)
-  {
+  if ((uint32_t) addr + (uint32_t) filesize >= (uint32_t) PHYS_BASE) {
     f->eax = -1;
-    lock_release(&file_sema);
     return;
   }
 
   //check overlaping
   if (spt_file_overlaping((uint32_t) addr, filesize, t->tid)) {
     f->eax = -1;
-    lock_release(&file_sema);
     return;
   }
 
   struct file *reopend_file = file_reopen(fd->f);
-  lock_release(&file_sema);
 
   if (reopend_file == NULL) {
     f->eax = -1;
@@ -854,8 +838,8 @@ void handler_mmap(struct intr_frame *f) {
   struct list *mapped_list = &thread_current()->mapped_files;
   if (!list_empty(mapped_list)) {
     int id = list_entry(list_back(mapped_list),
-                        struct m_file,
-                        list_elem)->id;
+    struct m_file,
+    list_elem)->id;
     last_id = id + 1;
   }
 
@@ -887,15 +871,11 @@ void handler_munmap(struct intr_frame *f) {
   struct thread *t = thread_current();
 
   //lock
-  lock_acquire(&file_sema);
   struct m_file *m_file = find_mfile(map_id, t);
 
   if (m_file == 0) {
-    lock_release(&file_sema);
     return;
   }
-
-  lock_release(&file_sema);
 
   //remove from supplemental table, page table. Flush if necessary
   close_mfile(t, m_file);
@@ -910,13 +890,11 @@ void close_mfile(struct thread *t, struct m_file *m_file) {
   uint32_t mapped_file_vaddr = m_file->vaddr;
   tid_t pid = t->tid;
 
-  fs_lock();
   off_t fileLength = file_length(m_file->file);
-  fs_unlock();
   frametable_lock();
   for (int i = 0; i < fileLength; i += PGSIZE) {
     struct spt_entry *entry_ptr = spt_get_entry(t,
-            (uint32_t)mapped_file_vaddr + i, pid);
+                                                (uint32_t) mapped_file_vaddr + i, pid);
     struct spt_entry entry_copy = *entry_ptr;
 
     ASSERT(entry_ptr != NULL);
@@ -930,19 +908,15 @@ void close_mfile(struct thread *t, struct m_file *m_file) {
         set_pinned(kaddr);
         frametable_unlock();
         // page has been written to
-        fs_lock();
         file_seek(m_file->file, (int) entry_copy.file_offset);
         file_uncached_write(m_file->file, (void *) kaddr, (int) entry_copy
-        .read_bytes);
-        fs_unlock();
+                .read_bytes);
 
         frametable_lock();
       }
-    }
-    else if (entry_copy.spe_status == mapped_file){
+    } else if (entry_copy.spe_status == mapped_file) {
       // all good, no need to write back
-    }
-    else {
+    } else {
       ASSERT(0);
     }
 
@@ -950,28 +924,10 @@ void close_mfile(struct thread *t, struct m_file *m_file) {
   }
   frametable_unlock();
 
-  fs_lock();
   file_close(m_file->file);
-  fs_unlock();
 }
 
-void fs_lock()
-{
-  lock_acquire(&file_sema);
-}
-
-void fs_unlock()
-{
-  lock_release(&file_sema);
-}
-
-bool fs_lock_held_by_current_thread()
-{
-  return lock_held_by_current_thread(&file_sema);
-}
-
-static void handler_chdir(struct intr_frame *f)
-{
+static void handler_chdir(struct intr_frame *f) {
   int *stack = f->esp;
 
   //args
@@ -996,9 +952,8 @@ static void handler_chdir(struct intr_frame *f)
 
   bool is_dir = false;
   void *file_or_dir = traverse_path(cwd, &is_dir, false, NULL, NULL);
-  if (!is_dir || !file_or_dir)
-  {
-    if (file_or_dir) file_close((struct file *)file_or_dir);
+  if (!is_dir || !file_or_dir) {
+    if (file_or_dir) file_close((struct file *) file_or_dir);
     f->eax = ret_val;
     return;
   }
@@ -1007,13 +962,12 @@ static void handler_chdir(struct intr_frame *f)
     dir_close(t->working_directory);
 
   t->working_directory_deleted = false;
-  t->working_directory = (struct dir *)file_or_dir;
+  t->working_directory = (struct dir *) file_or_dir;
 
   f->eax = true;
 }
 
-static void handler_mkdir(struct intr_frame *f)
-{
+static void handler_mkdir(struct intr_frame *f) {
   int *stack = f->esp;
 
   //args
@@ -1036,8 +990,7 @@ static void handler_mkdir(struct intr_frame *f)
   f->eax = filesys_create_dir(dir_name);
 }
 
-static void handler_readdir(struct intr_frame *f)
-{
+static void handler_readdir(struct intr_frame *f) {
   int *stack = f->esp;
 
   //args
@@ -1066,8 +1019,7 @@ static void handler_readdir(struct intr_frame *f)
     writeu(item, strlen(item) + 1, name);
 }
 
-static void handler_isdir(struct intr_frame *f)
-{
+static void handler_isdir(struct intr_frame *f) {
   int *stack = f->esp;
 
   //args
@@ -1084,8 +1036,7 @@ static void handler_isdir(struct intr_frame *f)
   f->eax = fd->is_directory;
 }
 
-static void handler_inumber(struct intr_frame *f)
-{
+static void handler_inumber(struct intr_frame *f) {
   int *stack = f->esp;
 
   //args
@@ -1099,11 +1050,9 @@ static void handler_inumber(struct intr_frame *f)
     return;
   }
 
-  if (fd->is_directory)
-  {
+  if (fd->is_directory) {
     f->eax = inode_get_sector(dir_get_inode(fd->d));
-  }
-  else {
+  } else {
     f->eax = inode_get_sector(fd->f->inode);
   }
 }

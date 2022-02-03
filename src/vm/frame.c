@@ -147,14 +147,9 @@ void do_swapping() {
     se->spe_status = mapped_file;
     if (se->writable)
     {
-      bool was_already_locked = fs_lock_held_by_current_thread();
-      if (!was_already_locked) fs_lock();
-
       file_seek(se->file, (int) se->file_offset);
       //file_write(se->file, kernel_addr, (int) se->read_bytes);
       file_uncached_write(se->file, kernel_addr, (int) se->read_bytes);
-
-      if (!was_already_locked) fs_unlock();
     }
 
 
